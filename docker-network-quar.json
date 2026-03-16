@@ -1,0 +1,33 @@
+[
+    {
+        "Name": "quarantine-lan",
+        "Id": "20064fe139d5815aa59aba084d7f748130bd1ea0045b82e3a46afc9bd2bb45bf",
+        "Created": "2026-02-24T06:48:54.517668069+05:30",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv4": true,
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": {},
+            "Config": [
+                {
+                    "Subnet": "192.168.30.0/24",
+                    "Gateway": "192.168.30.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {},
+        "Options": {
+            "com.docker.network.bridge.name": "docker-quar"
+        },
+        "Labels": {}
+    }
+]

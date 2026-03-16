@@ -1,0 +1,14 @@
+# Logs — too large, not needed on new system
+log-controller.txt
+log-ratelimit.txt
+log-alerts.txt
+log-behavior.txt
+log-init.txt
+
+# Backup files
+iptables-legacy-rules.txt
+resolv.conf.bak
+
+# Python cache
+__pycache__/
+*.pyc

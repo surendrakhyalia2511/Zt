@@ -1,0 +1,34 @@
+=== OS ===
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.4 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+=== Python ===
+Python 3.12.3
+=== Docker ===
+Docker version 28.2.2, build 28.2.2-0ubuntu1~24.04.1
+Docker Compose version v5.0.2
+=== Packages ===
+ii  arp-scan                              1.10.0-2build2                          amd64        arp scanning and fingerprinting tool
+ii  iptables                              1.8.10-3ubuntu2                         amd64        administration tools for packet filtering and NAT
+ii  iptables-persistent                   1.0.20                                  all          boot-time loader for netfilter rules, iptables plugin
+ii  libip4tc2:amd64                       1.8.10-3ubuntu2                         amd64        netfilter libip4tc library
+ii  libip6tc2:amd64                       1.8.10-3ubuntu2                         amd64        netfilter libip6tc library
+ii  libnetfilter-conntrack3:amd64         1.0.9-6build1                           amd64        Netfilter netlink-conntrack library
+ii  libnftables1:amd64                    1.0.9-1build1                           amd64        Netfilter nftables high level userspace API library
+ii  libnftnl11:amd64                      1.2.6-2build1                           amd64        Netfilter nftables userspace API library
+ii  libxtables12:amd64                    1.8.10-3ubuntu2                         amd64        netfilter xtables library
+ii  netfilter-persistent                  1.0.20                                  all          boot-time loader for netfilter configuration
+ii  nftables                              1.0.9-1build1                           amd64        Program to control packet filtering rules by Netfilter project
+ii  nmap                                  7.94+git20230807.3be01efb1+dfsg-3build2 amd64        The Network Mapper
+ii  nmap-common                           7.94+git20230807.3be01efb1+dfsg-3build2 all          Architecture independent files for nmap
+ii  tcpdump                               4.99.4-3ubuntu4.24.04.1                 amd64        command-line network traffic analyzer

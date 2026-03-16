@@ -1,0 +1,15 @@
+[Unit]
+Description=Zero Trust IoT Lab Initialization
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/sk/zt-lab-init.sh
+TimeoutStartSec=120
+User=root
+
+[Install]
+WantedBy=multi-user.target

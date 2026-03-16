@@ -1,0 +1,287 @@
+{
+  "printer": {
+    "container": "printer",
+    "last_ip": "192.168.20.15",
+    "mac": "26:f6:18:1b:01:81",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "Network Printer",
+    "open_ports": [
+      631
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "lock1": {
+    "container": "lock1",
+    "last_ip": "192.168.20.10",
+    "mac": "02:a7:8b:48:a9:4c",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": true,
+    "quarantined": false,
+    "quarantine_count": 1,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "nas": {
+    "container": "nas",
+    "last_ip": "192.168.20.3",
+    "mac": "5e:e2:74:d7:f5:bd",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "badge": {
+    "container": "badge",
+    "last_ip": "192.168.20.2",
+    "mac": "b2:4f:56:fe:25:68",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "plug1": {
+    "container": "plug1",
+    "last_ip": "192.168.20.8",
+    "mac": "72:8a:08:9c:b9:da",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "cam1": {
+    "container": "cam1",
+    "last_ip": "192.168.20.14",
+    "mac": "1e:3c:85:87:37:b1",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "chromecast": {
+    "container": "chromecast",
+    "last_ip": "192.168.20.13",
+    "mac": "5a:7e:de:6d:be:15",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "bulb1": {
+    "container": "bulb1",
+    "last_ip": "192.168.20.7",
+    "mac": "62:ef:1f:12:96:1e",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "MQTT Sensor/Actuator",
+    "open_ports": [
+      1883
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "envsensor": {
+    "container": "envsensor",
+    "last_ip": "192.168.20.12",
+    "mac": "da:4a:cc:ca:c7:ab",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "MQTT Sensor/Actuator",
+    "open_ports": [
+      1883
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "nvr": {
+    "container": "nvr",
+    "last_ip": "192.168.20.5",
+    "mac": "b2:ca:db:d7:14:bf",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "thermo1": {
+    "container": "thermo1",
+    "last_ip": "192.168.20.11",
+    "mac": "a6:4f:3c:bd:7f:30",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "MQTT Sensor/Actuator",
+    "open_ports": [
+      1883
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "tv1": {
+    "container": "tv1",
+    "last_ip": "192.168.20.9",
+    "mac": "46:03:15:ec:b6:98",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "sensorhub": {
+    "container": "sensorhub",
+    "last_ip": "192.168.20.4",
+    "mac": "be:19:d8:68:36:5a",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "lighting": {
+    "container": "lighting",
+    "last_ip": "192.168.20.16",
+    "mac": "de:4e:ef:27:b9:af",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "MQTT Sensor/Actuator",
+    "open_ports": [
+      1883
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  },
+  "energymeter": {
+    "container": "energymeter",
+    "last_ip": "192.168.20.6",
+    "mac": "f2:f6:96:20:df:fe",
+    "vendor": "(Unknown: locally administered)",
+    "device_type": "HTTP Device",
+    "open_ports": [
+      80
+    ],
+    "scanning": false,
+    "connections": 0,
+    "under_attack": false,
+    "quarantined_before": false,
+    "quarantined": false,
+    "quarantine_count": 0,
+    "rl_penalty": 0,
+    "rl_applied": true,
+    "east_west": false
+  }
+}

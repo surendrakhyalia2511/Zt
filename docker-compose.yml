@@ -1,0 +1,96 @@
+version: "3.8"
+
+services:
+  cam1:
+    image: nginx
+    container_name: cam1
+    networks:
+      iot-lan:
+
+  bulb1:
+    image: eclipse-mosquitto
+    container_name: bulb1
+    networks:
+      iot-lan:
+
+  plug1:
+    image: httpd
+    container_name: plug1
+    networks:
+      iot-lan:
+
+  lock1:
+    image: nginx
+    container_name: lock1
+    networks:
+      iot-lan:
+
+  thermo1:
+    image: eclipse-mosquitto
+    container_name: thermo1
+    networks:
+      iot-lan:
+
+  tv1:
+    image: nginx
+    container_name: tv1
+    networks:
+      iot-lan:
+
+  chromecast:
+    image: nginx
+    container_name: chromecast
+    networks:
+      iot-lan:
+
+  nvr:
+    image: nginx
+    container_name: nvr
+    networks:
+      iot-lan:
+
+  envsensor:
+    image: eclipse-mosquitto
+    container_name: envsensor
+    networks:
+      iot-lan:
+
+  sensorhub:
+    image: nginx
+    container_name: sensorhub
+    networks:
+      iot-lan:
+
+  energymeter:
+    image: httpd
+    container_name: energymeter
+    networks:
+      iot-lan:
+
+  badge:
+    image: nginx
+    container_name: badge
+    networks:
+      iot-lan:
+
+  lighting:
+    image: eclipse-mosquitto
+    container_name: lighting
+    networks:
+      iot-lan:
+
+  printer:
+    image: olbat/cupsd
+    container_name: printer
+    networks:
+      iot-lan:
+
+  nas:
+    image: nginx
+    container_name: nas
+    networks:
+      iot-lan:
+
+networks:
+  iot-lan:
+    external: true

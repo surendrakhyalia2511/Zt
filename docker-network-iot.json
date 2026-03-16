@@ -1,0 +1,139 @@
+[
+    {
+        "Name": "iot-lan",
+        "Id": "44cb28b6b028d1ac97aeaf7db39834f30af4a1924281c59e4d2ca9ea5497d625",
+        "Created": "2026-02-23T00:11:34.237042458+05:30",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv4": true,
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": {},
+            "Config": [
+                {
+                    "Subnet": "192.168.20.0/24",
+                    "Gateway": "192.168.20.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "02df9d392e7e9ccf0242806cd2f3adf8aaf8c7ba778200c51eed911e2306caef": {
+                "Name": "chromecast",
+                "EndpointID": "8614cd8b39c04c763a0041af59a5fb515f881989e63ec11b68044a4d5c5238d9",
+                "MacAddress": "5a:7e:de:6d:be:15",
+                "IPv4Address": "192.168.20.13/24",
+                "IPv6Address": ""
+            },
+            "361fdcde7ce7ad932ed4d5aed6644e43b06d6e2d7df158af66f0b97a44f39d45": {
+                "Name": "thermo1",
+                "EndpointID": "f57c238736cd64bc98b127a5de4c61ef72da5c179ef8ceacc3a5d8a734e4ef0b",
+                "MacAddress": "a6:4f:3c:bd:7f:30",
+                "IPv4Address": "192.168.20.11/24",
+                "IPv6Address": ""
+            },
+            "3fc75e6d58de152ac3df1ebf14a016300e01458c40426c2c2293d7b10dee84f5": {
+                "Name": "badge",
+                "EndpointID": "148bcbfbe6e530a2fa756dfc5f75db60b2d9ffb6e5fd5a3e18e542c3c260b70e",
+                "MacAddress": "b2:4f:56:fe:25:68",
+                "IPv4Address": "192.168.20.2/24",
+                "IPv6Address": ""
+            },
+            "8a1e09f77c392d19db4b2c9e99d730b4b964511139f42f4510dc991650015556": {
+                "Name": "sensorhub",
+                "EndpointID": "04fee6a5a78853a27ff439230d2c5ec6d925e6381edfd8398c7016586925b956",
+                "MacAddress": "be:19:d8:68:36:5a",
+                "IPv4Address": "192.168.20.4/24",
+                "IPv6Address": ""
+            },
+            "8c3f4602d8e279a1e24d9427e70594e8e0bb16f7c2bf0166e8113ed5434f3918": {
+                "Name": "printer",
+                "EndpointID": "8dbec1c984cb783b3e10b9489bf2ae26df40088ba222f81a067613b5622fe352",
+                "MacAddress": "26:f6:18:1b:01:81",
+                "IPv4Address": "192.168.20.15/24",
+                "IPv6Address": ""
+            },
+            "9af693d38d95b8a69c0ad048487cc529704e5b3eed473eeba2f51e1670439ae0": {
+                "Name": "tv1",
+                "EndpointID": "5f22d0909b044fa13f6f1703f8eb946787c582dcbfba0805bbb2ab0730014052",
+                "MacAddress": "46:03:15:ec:b6:98",
+                "IPv4Address": "192.168.20.9/24",
+                "IPv6Address": ""
+            },
+            "9ef60339e6ed31d233e8b3ab1e1d0b3f87771b70df0fd8ef94ee851880819e54": {
+                "Name": "lighting",
+                "EndpointID": "e762144e35e3d5feb299d35a202e7b3ba3080b181f56e0f605f40f9113571ed3",
+                "MacAddress": "de:4e:ef:27:b9:af",
+                "IPv4Address": "192.168.20.16/24",
+                "IPv6Address": ""
+            },
+            "9f23560d3a000afafafa07da33ce2208baa66e826344b5091b088c9d14162c6d": {
+                "Name": "lock1",
+                "EndpointID": "77ded593378630c1662f795d9f1b91cd21f9c3f2a0d224f75bafdad58da7bd8f",
+                "MacAddress": "02:a7:8b:48:a9:4c",
+                "IPv4Address": "192.168.20.10/24",
+                "IPv6Address": ""
+            },
+            "b67d8303b68c6509cc7a83eccf5309f2d57c6fc794dc13c200b4a140661d8c57": {
+                "Name": "energymeter",
+                "EndpointID": "ccd7fb1288b753a76bd45de711453bc7e86b5572ebe3c9d288c6e190e22527a5",
+                "MacAddress": "f2:f6:96:20:df:fe",
+                "IPv4Address": "192.168.20.6/24",
+                "IPv6Address": ""
+            },
+            "bc2fd81f0051aab669d9fe59cfbbb7d34d4c20aa297f8e927fc8cefbed45dcb3": {
+                "Name": "cam1",
+                "EndpointID": "9a9f8c350df1d482225fb9a539643f35278f3e91641fbaf12341195ce0c4b7ae",
+                "MacAddress": "1e:3c:85:87:37:b1",
+                "IPv4Address": "192.168.20.14/24",
+                "IPv6Address": ""
+            },
+            "c0509a7fdd383a7c795ac16308e92418635b61fe52d95da068155df43be69a66": {
+                "Name": "envsensor",
+                "EndpointID": "d750aec9ce09f462e62fbdb36342dababc159143f37eb0ad91a77fdd3c54ae7d",
+                "MacAddress": "da:4a:cc:ca:c7:ab",
+                "IPv4Address": "192.168.20.12/24",
+                "IPv6Address": ""
+            },
+            "d06f2aff140ececb48198653bd27c1d13580d4ec7da7a93c182778157144098f": {
+                "Name": "nvr",
+                "EndpointID": "12064954d66e7f3fe7afec5034d1f585c6a301512342e933f2e9e8a8439aaceb",
+                "MacAddress": "b2:ca:db:d7:14:bf",
+                "IPv4Address": "192.168.20.5/24",
+                "IPv6Address": ""
+            },
+            "e0d7605afdafe5fd7c360b362bafa0cf69920b58faa14a7613cc2310056787d0": {
+                "Name": "plug1",
+                "EndpointID": "14cc7cc1665628b5980996e09b78cdacd42f0fd80a2947a9b8dda83f2a7589f1",
+                "MacAddress": "72:8a:08:9c:b9:da",
+                "IPv4Address": "192.168.20.8/24",
+                "IPv6Address": ""
+            },
+            "efd9728dd6942b609b46428aa47c4a1dd556267e12ad89b68557e49893562c33": {
+                "Name": "bulb1",
+                "EndpointID": "c8285fc0db33ca3a60121da85c7211f058d189da797a39e51a5f1d01d4782f36",
+                "MacAddress": "62:ef:1f:12:96:1e",
+                "IPv4Address": "192.168.20.7/24",
+                "IPv6Address": ""
+            },
+            "f2a87c220ea2f0c242341c5e694e98eb0491e5e87e0a20a8383d03d0c86d3abd": {
+                "Name": "nas",
+                "EndpointID": "3481f82d4ca0d9c7966e2b84c46145ab706aea57ff6f3f30221c63e99b656130",
+                "MacAddress": "5e:e2:74:d7:f5:bd",
+                "IPv4Address": "192.168.20.3/24",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {
+            "com.docker.network.bridge.name": "docker-iot"
+        },
+        "Labels": {}
+    }
+]
