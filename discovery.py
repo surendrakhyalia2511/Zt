@@ -10,6 +10,7 @@ from logger import log
 
 IOT_NET        = "192.168.20"
 QUARANTINE_NET = "192.168.30"
+TRUSTED_NET    = "192.168.10"
 BRIDGE_IOT     = "docker-iot"
 BRIDGE_QUAR    = "docker-quar"
 
@@ -31,7 +32,7 @@ def discover_devices():
     """
     log("Running device discovery on IoT + Quarantine networks...")
     devices = {}
-    for bridge, net in [(BRIDGE_IOT, IOT_NET), (BRIDGE_QUAR, QUARANTINE_NET)]:
+    for bridge, net in [(BRIDGE_IOT, IOT_NET), (BRIDGE_QUAR, QUARANTINE_NET), ("ens37", TRUSTED_NET)]:
         r = subprocess.run(
             ["arp-scan", f"--interface={bridge}", "--localnet"],
             capture_output=True, text=True
@@ -42,9 +43,20 @@ def discover_devices():
                 ip      = parts[0]
                 mac     = parts[1]
                 vendor  = " ".join(parts[2:]) if len(parts) > 2 else "Unknown"
-                is_quar = (net == QUARANTINE_NET)
-                devices[ip] = {"mac": mac, "vendor": vendor, "quarantined": is_quar}
-                zone = "QUARANTINE" if is_quar else "IoT LAN"
+                is_quar   = (net == QUARANTINE_NET)
+                is_trusted = (net == TRUSTED_NET)
+                devices[ip] = {
+                    "mac":        mac,
+                    "vendor":     vendor,
+                    "quarantined": is_quar,
+                    "trusted":    is_trusted,
+                }
+                if is_quar:
+                    zone = "QUARANTINE"
+                elif is_trusted:
+                    zone = "TRUSTED   "
+                else:
+                    zone = "IoT LAN   "
                 log(f"Discovered [{zone}]: {ip} | {mac} | {vendor}")
     return devices
 

@@ -3,113 +3,131 @@
 traffic_monitor.py
 Zero Trust IoT Gateway — Traffic and East-West Monitoring
 
-Runs two tcpdump captures in parallel every cycle:
-  1. ens37    — C-Devices LAN → IoT LAN (detects external attacker scans)
-  2. docker-iot bridge — IoT → IoT (detects east-west lateral movement)
-
-Both run simultaneously for MONITOR_INTERVAL seconds so no time is wasted.
+NEW: count_new_connections() counts SYN packets per source IP
+     from tcpdump output — zero iptables dependency, always works.
 """
 
 import subprocess
 import threading
 from collections import defaultdict
 from logger import log
+import sys, os
+sys.path.insert(0, os.environ.get("APP_PATH", "/home/sk"))
+from env_loader import env
 
-IOT_NET     = "192.168.20"
-TRUSTED_NET = "192.168.10"
-BRIDGE_IOT  = "docker-iot"
+IOT_NET     = env("IOT_NET",     "192.168.20")
+TRUSTED_NET = env("TRUSTED_NET", "192.168.10")
+BRIDGE_IOT  = env("BRIDGE_IOT",  "docker-iot")
+TRUSTED_IF  = env("TRUSTED_IFACE", "ens37")
 
 
 def capture_both(duration):
     """
     Run ens37 and docker-iot tcpdump captures in parallel.
-
-    Args:
-        duration : int — seconds to capture
-
     Returns:
-        connection_map : { src_ip: set(dst_ips) }
-                         Kali/trusted → IoT LAN connections (attack scan)
-        east_west_map  : { src_ip: set(dst_ips) }
-                         IoT → IoT connections (lateral movement)
+        connection_map : { src_ip: set(dst_ips) }  — trusted→IoT (scan detection)
+        east_west_map  : { src_ip: set(dst_ips) }  — IoT→IoT (lateral movement)
+        new_conn_counts: { src_ip: int }            — NEW connections per IoT device
     """
-    log(f"Monitoring traffic on ens37 + docker-iot for {duration} seconds...")
+    log(f"Monitoring traffic on {TRUSTED_IF} + docker-iot for {duration} seconds...")
 
-    ens37_out  = [None]
-    bridge_out = [None]
+    ens37_lines  = [None]
+    bridge_lines = [None]
+    iot_out      = [None]
 
     def _capture_ens37():
-        ens37_out[0] = subprocess.run(
+        r = subprocess.run(
             ["timeout", str(duration), "tcpdump",
-             "-i", "ens37", "-nn", "-q",
+             "-i", TRUSTED_IF, "-nn", "-q",
              f"src net {TRUSTED_NET}.0/24 and dst net {IOT_NET}.0/24"],
             capture_output=True, text=True
         )
+        ens37_lines[0] = r.stdout
 
     def _capture_bridge():
-        bridge_out[0] = subprocess.run(
+        r = subprocess.run(
             ["timeout", str(duration), "tcpdump",
              "-i", BRIDGE_IOT, "-nn", "-q", "-c", "500",
              f"src net {IOT_NET}.0/24 and dst net {IOT_NET}.0/24"],
             capture_output=True, text=True
         )
+        bridge_lines[0] = r.stdout
+
+    def _capture_iot_syn():
+        """
+        Capture NEW TCP connections from IoT devices to outside.
+        'tcp[tcpflags] & tcp-syn != 0' matches SYN packets only.
+        Each SYN = one new connection attempt.
+        """
+        r = subprocess.run(
+            ["timeout", str(duration), "tcpdump",
+             "-i", BRIDGE_IOT, "-nn", "-q", "-c", "2000",
+             f"src net {IOT_NET}.0/24 and "
+             f"not dst net {IOT_NET}.0/24 and "
+             f"tcp[tcpflags] & tcp-syn != 0"],
+            capture_output=True, text=True
+        )
+        iot_out[0] = r.stdout
 
     t1 = threading.Thread(target=_capture_ens37)
     t2 = threading.Thread(target=_capture_bridge)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
+    t3 = threading.Thread(target=_capture_iot_syn)
+    t1.start(); t2.start(); t3.start()
+    t1.join();  t2.join();  t3.join()
 
     # ── Parse ens37 → connection_map ──────────────────────────
     connection_map = defaultdict(set)
-    if ens37_out[0]:
-        for line in ens37_out[0].stdout.splitlines():
-            if "IP" not in line:
-                continue
-            parts = line.split()
-            for i, token in enumerate(parts):
-                if token == "IP" and i + 3 < len(parts):
-                    src_ip = ".".join(parts[i+1].split(".")[:4])
-                    dst_ip = ".".join(parts[i+3].rstrip(":").split(".")[:4])
-                    if src_ip.startswith(TRUSTED_NET):
-                        connection_map[src_ip].add(dst_ip)
-                    break
+    for line in (ens37_lines[0] or "").splitlines():
+        if "IP" not in line:
+            continue
+        parts = line.split()
+        for i, token in enumerate(parts):
+            if token == "IP" and i + 3 < len(parts):
+                src_ip = ".".join(parts[i+1].split(".")[:4])
+                dst_ip = ".".join(parts[i+3].rstrip(":").split(".")[:4])
+                if src_ip.startswith(TRUSTED_NET):
+                    connection_map[src_ip].add(dst_ip)
+                break
 
-    # ── Parse bridge → east_west_map ──────────────────────────
+    # ── Parse docker-iot bridge → east_west_map ───────────────
     east_west_map = defaultdict(set)
-    if bridge_out[0]:
-        for line in bridge_out[0].stdout.splitlines():
-            if "IP" not in line:
-                continue
-            parts = line.split()
-            for i, token in enumerate(parts):
-                if token == "IP" and i + 3 < len(parts):
-                    src_ip = ".".join(parts[i+1].split(".")[:4])
-                    dst_ip = ".".join(parts[i+3].rstrip(":").split(".")[:4])
-                    if (src_ip.startswith(IOT_NET) and
-                            dst_ip.startswith(IOT_NET) and
-                            src_ip != dst_ip):
-                        east_west_map[src_ip].add(dst_ip)
-                    break
+    for line in (bridge_lines[0] or "").splitlines():
+        if "IP" not in line:
+            continue
+        parts = line.split()
+        for i, token in enumerate(parts):
+            if token == "IP" and i + 3 < len(parts):
+                src_ip = ".".join(parts[i+1].split(".")[:4])
+                dst_ip = ".".join(parts[i+3].rstrip(":").split(".")[:4])
+                if (src_ip.startswith(IOT_NET) and
+                        dst_ip.startswith(IOT_NET) and
+                        src_ip != dst_ip):
+                    east_west_map[src_ip].add(dst_ip)
+                break
 
-    return connection_map, east_west_map
+    # ── Parse IoT SYN packets → new_conn_counts ───────────────
+    # Count SYN packets per source IP = new connection attempts
+    new_conn_counts = defaultdict(int)
+    for line in (iot_out[0] or "").splitlines():
+        if "IP" not in line:
+            continue
+        parts = line.split()
+        for i, token in enumerate(parts):
+            if token == "IP" and i + 1 < len(parts):
+                src_raw = parts[i+1]
+                # Remove port (last segment after last dot)
+                src_parts = src_raw.split(".")
+                if len(src_parts) >= 4:
+                    src_ip = ".".join(src_parts[:4])
+                    if src_ip.startswith(IOT_NET):
+                        new_conn_counts[src_ip] += 1
+                break
+
+    return connection_map, east_west_map, new_conn_counts
 
 
 def detect_scan(connection_map, trusted_net, iot_net, scan_threshold):
-    """
-    Analyse connection_map for scanning behavior.
-
-    Args:
-        connection_map  : output from capture_both()
-        trusted_net     : TRUSTED_NET prefix string
-        iot_net         : IOT_NET prefix string
-        scan_threshold  : min unique destinations to count as scan
-
-    Returns:
-        attacked_devices : set of IoT IPs being actively targeted
-        attacker_ips     : set of attacker source IPs detected
-    """
+    """Analyse connection_map for scanning behavior."""
     attacked_devices = set()
     attacker_ips     = set()
 

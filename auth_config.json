@@ -1,0 +1,7 @@
+{
+  "mode": "jwt",
+  "username": "admin",
+  "password": "Password123",
+  "api_key": "z3Z-zn3DnEDi9fkgehGgC2Nh0NZt-cxypQjifyU9zv4",
+  "jwt_secret": "selAhkE3hkZ0GmSBGFzQ-v9-V3HqStVqnkT0x4RdWIsk15OR6LCdFGqhOP7ZgC9sS6SrhWtblCxon1IT5PbEgw"
+}

@@ -1,0 +1,280 @@
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+ACCEPT     17   --  0.0.0.0/0            0.0.0.0/0            udp dpt:53
+ACCEPT     6    --  0.0.0.0/0            0.0.0.0/0            tcp dpt:53
+ACCEPT     17   --  0.0.0.0/0            0.0.0.0/0            udp dpt:53
+ACCEPT     6    --  0.0.0.0/0            0.0.0.0/0            tcp dpt:53
+LOG        0    --  192.168.10.100       0.0.0.0/0            LOG flags 0 level 4 prefix "INPUT-KALI: "
+
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     17   --  0.0.0.0/0            0.0.0.0/0            udp dpt:53
+ACCEPT     6    --  0.0.0.0/0            0.0.0.0/0            tcp dpt:53
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+DOCKER-USER  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-FORWARD  0    --  0.0.0.0/0            0.0.0.0/0           
+LOG        0    --  192.168.10.100       0.0.0.0/0            LOG flags 0 level 4 prefix "KALI-PKT: "
+LOG        0    --  192.168.10.100       0.0.0.0/0            LOG flags 0 level 4 prefix "KALI-PKT: "
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
+ACCEPT     17   --  0.0.0.0/0            0.0.0.0/0            udp spt:53
+
+Chain DOCKER (3 references)
+target     prot opt source               destination         
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-BRIDGE (1 references)
+target     prot opt source               destination         
+DOCKER     0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER     0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER     0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-CT (1 references)
+target     prot opt source               destination         
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+
+Chain DOCKER-FORWARD (1 references)
+target     prot opt source               destination         
+DOCKER-CT  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-ISOLATION-STAGE-1  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-BRIDGE  0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-ISOLATION-STAGE-1 (1 references)
+target     prot opt source               destination         
+DOCKER-ISOLATION-STAGE-2  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-ISOLATION-STAGE-2  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-ISOLATION-STAGE-2  0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-ISOLATION-STAGE-2 (3 references)
+target     prot opt source               destination         
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-USER (1 references)
+target     prot opt source               destination         
+table ip raw {
+	chain PREROUTING {
+		type filter hook prerouting priority raw; policy accept;
+	}
+
+	chain OUTPUT {
+		type filter hook output priority raw; policy accept;
+	}
+}
+table ip filter {
+	chain INPUT {
+		type filter hook input priority filter; policy accept;
+		iifname "ens37" udp dport 53 counter packets 576 bytes 38548 accept
+		iifname "ens37" tcp dport 53 counter packets 0 bytes 0 accept
+		iifname "ens37" udp dport 53 counter packets 68 bytes 4512 accept
+		iifname "ens37" tcp dport 53 counter packets 0 bytes 0 accept
+		ip saddr 192.168.10.100 counter packets 5 bytes 420 log prefix "INPUT-KALI: "
+	}
+
+	chain FORWARD {
+		type filter hook forward priority filter; policy accept;
+		iifname "ens37" oifname "ens33" counter packets 126 bytes 8344 accept
+		iifname "ens33" oifname "ens37" counter packets 2 bytes 168 accept
+		iifname "ens37" udp dport 53 counter packets 58 bytes 3840 accept
+		iifname "ens37" tcp dport 53 counter packets 3 bytes 180 accept
+		ct state related,established counter packets 340 bytes 21021 accept
+		counter packets 335 bytes 19424 jump DOCKER-USER
+		counter packets 335 bytes 19424 jump DOCKER-FORWARD
+		ip saddr 192.168.10.100 counter packets 76 bytes 4988 log prefix "KALI-PKT: "
+		ip saddr 192.168.10.100 counter packets 76 bytes 4988 log prefix "KALI-PKT: "
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "docker-iot" oifname "ens37" counter packets 0 bytes 0 accept
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "docker-iot" oifname "ens37" counter packets 0 bytes 0 accept
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "docker-iot" oifname "ens33" counter packets 0 bytes 0 accept
+		iifname "docker-iot" oifname "ens37" counter packets 0 bytes 0 drop
+		iifname "docker-iot" oifname "docker-iot" counter packets 0 bytes 0 drop
+		iifname "docker-quar" oifname "ens33" counter packets 0 bytes 0 accept
+		iifname "docker-quar" oifname "ens37" counter packets 0 bytes 0 drop
+		iifname "docker-quar" oifname "docker-iot" counter packets 0 bytes 0 drop
+		iifname "docker-quar" oifname "docker-quar" counter packets 0 bytes 0 drop
+	}
+
+	chain OUTPUT {
+		type filter hook output priority filter; policy accept;
+		oifname "ens37" udp sport 53 counter packets 0 bytes 0 accept
+	}
+
+	chain DOCKER {
+		iifname "ens37" oifname "docker-iot" counter packets 256 bytes 14184 accept
+		iifname != "docker-iot" oifname "docker-iot" counter packets 0 bytes 0 drop
+		iifname != "docker0" oifname "docker0" counter packets 0 bytes 0 drop
+		iifname != "docker-quar" oifname "docker-quar" counter packets 0 bytes 0 drop
+	}
+
+	chain DOCKER-FORWARD {
+		counter packets 335 bytes 19424 jump DOCKER-CT
+		counter packets 334 bytes 19340 jump DOCKER-ISOLATION-STAGE-1
+		counter packets 334 bytes 19340 jump DOCKER-BRIDGE
+		iifname "docker-iot" counter packets 2 bytes 168 accept
+		iifname "docker0" counter packets 0 bytes 0 accept
+		iifname "docker-quar" counter packets 0 bytes 0 accept
+	}
+
+	chain DOCKER-USER {
+	}
+
+	chain DOCKER-BRIDGE {
+		oifname "docker-iot" counter packets 256 bytes 14184 jump DOCKER
+		oifname "docker0" counter packets 0 bytes 0 jump DOCKER
+		oifname "docker-quar" counter packets 0 bytes 0 jump DOCKER
+	}
+
+	chain DOCKER-CT {
+		oifname "docker-iot" ct state related,established counter packets 1 bytes 84 accept
+		oifname "docker0" ct state related,established counter packets 0 bytes 0 accept
+		oifname "docker-quar" ct state related,established counter packets 0 bytes 0 accept
+	}
+
+	chain DOCKER-ISOLATION-STAGE-1 {
+		iifname "docker-iot" oifname != "docker-iot" counter packets 2 bytes 168 jump DOCKER-ISOLATION-STAGE-2
+		iifname "docker0" oifname != "docker0" counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-2
+		iifname "docker-quar" oifname != "docker-quar" counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-2
+	}
+
+	chain DOCKER-ISOLATION-STAGE-2 {
+		oifname "docker-quar" counter packets 0 bytes 0 drop
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		oifname "docker0" counter packets 0 bytes 0 drop
+		oifname "docker-iot" counter packets 0 bytes 0 drop
+	}
+}
+table ip nat {
+	chain PREROUTING {
+		type nat hook prerouting priority dstnat; policy accept;
+		fib daddr type local counter packets 563 bytes 37700 jump DOCKER
+		iifname "ens37" udp dport 53 dnat to 127.0.0.53:53
+		iifname "ens37" tcp dport 53 dnat to 127.0.0.53:53
+	}
+
+	chain INPUT {
+		type nat hook input priority srcnat; policy accept;
+	}
+
+	chain OUTPUT {
+		type nat hook output priority dstnat; policy accept;
+		ip daddr != 127.0.0.0/8 fib daddr type local counter packets 27 bytes 1719 jump DOCKER
+	}
+
+	chain POSTROUTING {
+		type nat hook postrouting priority srcnat; policy accept;
+		ip saddr 192.168.30.0/24 oifname != "docker-quar" counter packets 0 bytes 0 masquerade
+		ip saddr 172.17.0.0/16 oifname != "docker0" counter packets 0 bytes 0 masquerade
+		ip saddr 192.168.20.0/24 oifname != "docker-iot" counter packets 0 bytes 0 masquerade
+		ip saddr 192.168.10.0/24 oifname "docker-iot" counter packets 255 bytes 14100 masquerade
+		ip saddr 192.168.10.0/24 counter packets 158 bytes 10394 masquerade
+		ip saddr 192.168.10.0/24 oifname "ens33" counter packets 0 bytes 0 masquerade
+	}
+
+	chain DOCKER {
+		iifname "docker-quar" counter packets 0 bytes 0 return
+		iifname "docker0" counter packets 0 bytes 0 return
+		iifname "docker-iot" counter packets 0 bytes 0 return
+	}
+}
+table ip6 filter {
+	chain INPUT {
+		type filter hook input priority filter; policy accept;
+	}
+
+	chain FORWARD {
+		type filter hook forward priority filter; policy accept;
+		counter packets 0 bytes 0 jump DOCKER-USER
+		counter packets 0 bytes 0 jump DOCKER-FORWARD
+	}
+
+	chain OUTPUT {
+		type filter hook output priority filter; policy accept;
+	}
+
+	chain DOCKER-FORWARD {
+		counter packets 0 bytes 0 jump DOCKER-CT
+		counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-1
+		counter packets 0 bytes 0 jump DOCKER-BRIDGE
+	}
+
+	chain DOCKER-USER {
+	}
+
+	chain DOCKER {
+	}
+
+	chain DOCKER-BRIDGE {
+	}
+
+	chain DOCKER-CT {
+	}
+
+	chain DOCKER-ISOLATION-STAGE-1 {
+	}
+
+	chain DOCKER-ISOLATION-STAGE-2 {
+	}
+}
+table ip6 nat {
+	chain PREROUTING {
+		type nat hook prerouting priority dstnat; policy accept;
+		fib daddr type local counter packets 0 bytes 0 jump DOCKER
+	}
+
+	chain INPUT {
+		type nat hook input priority srcnat; policy accept;
+	}
+
+	chain OUTPUT {
+		type nat hook output priority dstnat; policy accept;
+		ip6 daddr != ::1 fib daddr type local counter packets 0 bytes 0 jump DOCKER
+	}
+
+	chain POSTROUTING {
+		type nat hook postrouting priority srcnat; policy accept;
+	}
+
+	chain DOCKER {
+	}
+}
+default via 192.168.35.2 dev ens33 proto dhcp src 192.168.35.136 metric 100 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+192.168.10.0/24 dev ens37 proto kernel scope link src 192.168.10.1 
+192.168.20.0/24 dev docker-iot proto kernel scope link src 192.168.20.1 
+192.168.30.0/24 dev docker-quar proto kernel scope link src 192.168.30.1 linkdown 
+192.168.35.0/24 dev ens33 proto kernel scope link src 192.168.35.136 metric 100 
+192.168.35.2 dev ens33 proto dhcp scope link src 192.168.35.136 metric 100 
+NETWORK ID     NAME             DRIVER    SCOPE
+6bb79dbd5742   bridge           bridge    local
+3d6e8da54af6   host             host      local
+44cb28b6b028   iot-lan          bridge    local
+86b5009ca5f5   none             null      local
+20064fe139d5   quarantine-lan   bridge    local
+Saved at Tue Feb 24 08:53:37 AM IST 2026

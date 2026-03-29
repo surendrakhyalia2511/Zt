@@ -1,5 +1,5 @@
 NETWORK ID     NAME             DRIVER    SCOPE
-b30c8b56a010   bridge           bridge    local
+448e5996ff75   bridge           bridge    local
 3d6e8da54af6   host             host      local
 44cb28b6b028   iot-lan          bridge    local
 86b5009ca5f5   none             null      local

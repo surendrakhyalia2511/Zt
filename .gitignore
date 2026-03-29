@@ -12,3 +12,14 @@ resolv.conf.bak
 # Python cache
 __pycache__/
 *.pyc
+.env
+*.key
+*.crt
+certs/
+__pycache__/
+myenv/
+*.save
+*.save.*
+*la.py
+device_history.json
+log-*.txt

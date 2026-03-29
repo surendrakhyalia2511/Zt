@@ -1,0 +1,61 @@
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+LOG        0    --  192.168.10.100       0.0.0.0/0            LOG flags 0 level 4 prefix "INPUT-KALI: "
+
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+LOG        0    --  192.168.10.100       0.0.0.0/0            LOG flags 0 level 4 prefix "KALI-PKT: "
+LOG        0    --  192.168.10.100       0.0.0.0/0            LOG flags 0 level 4 prefix "KALI-PKT: "
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-USER  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-FORWARD  0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
+
+Chain DOCKER (2 references)
+target     prot opt source               destination         
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-BRIDGE (1 references)
+target     prot opt source               destination         
+DOCKER     0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER     0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-CT (1 references)
+target     prot opt source               destination         
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+
+Chain DOCKER-FORWARD (1 references)
+target     prot opt source               destination         
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-CT  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-ISOLATION-STAGE-1  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-BRIDGE  0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-ISOLATION-STAGE-1 (1 references)
+target     prot opt source               destination         
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-ISOLATION-STAGE-2  0    --  0.0.0.0/0            0.0.0.0/0           
+DOCKER-ISOLATION-STAGE-2  0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-ISOLATION-STAGE-2 (2 references)
+target     prot opt source               destination         
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+ACCEPT     0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+DROP       0    --  0.0.0.0/0            0.0.0.0/0           
+
+Chain DOCKER-USER (1 references)
+target     prot opt source               destination         

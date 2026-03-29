@@ -1,0 +1,164 @@
+table ip raw {
+	chain PREROUTING {
+		type filter hook prerouting priority raw; policy accept;
+	}
+
+	chain OUTPUT {
+		type filter hook output priority raw; policy accept;
+	}
+}
+table ip filter {
+	chain FORWARD {
+		type filter hook forward priority filter; policy accept;
+		ip saddr 192.168.10.100 counter packets 3902 bytes 148612 log prefix "KALI-PKT: "
+		ip saddr 192.168.10.100 counter packets 3902 bytes 148612 log prefix "KALI-PKT: "
+		iifname "ens37" oifname "docker-iot" counter packets 3902 bytes 148612 accept
+		iifname "docker-iot" oifname "ens37" counter packets 78 bytes 3280 accept
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "docker-iot" oifname "ens37" counter packets 0 bytes 0 accept
+		counter packets 0 bytes 0 jump DOCKER-USER
+		counter packets 0 bytes 0 jump DOCKER-FORWARD
+	}
+
+	chain INPUT {
+		type filter hook input priority filter; policy accept;
+		ip saddr 192.168.10.100 counter packets 3307 bytes 240658 log prefix "INPUT-KALI: "
+	}
+
+	chain OUTPUT {
+		type filter hook output priority filter; policy accept;
+	}
+
+	chain DOCKER {
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname != "docker0" oifname "docker0" counter packets 0 bytes 0 drop
+		iifname != "docker-iot" oifname "docker-iot" counter packets 0 bytes 0 drop
+	}
+
+	chain DOCKER-FORWARD {
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "docker-iot" oifname "ens37" counter packets 0 bytes 0 accept
+		counter packets 0 bytes 0 jump DOCKER-CT
+		counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-1
+		counter packets 0 bytes 0 jump DOCKER-BRIDGE
+		iifname "docker0" counter packets 0 bytes 0 accept
+		iifname "docker-iot" counter packets 0 bytes 0 accept
+	}
+
+	chain DOCKER-BRIDGE {
+		oifname "docker0" counter packets 0 bytes 0 jump DOCKER
+		oifname "docker-iot" counter packets 0 bytes 0 jump DOCKER
+	}
+
+	chain DOCKER-CT {
+		oifname "docker0" ct state related,established counter packets 0 bytes 0 accept
+		oifname "docker-iot" ct state related,established counter packets 0 bytes 0 accept
+	}
+
+	chain DOCKER-ISOLATION-STAGE-1 {
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "docker0" oifname != "docker0" counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-2
+		iifname "docker-iot" oifname != "docker-iot" counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-2
+	}
+
+	chain DOCKER-ISOLATION-STAGE-2 {
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "docker-iot" oifname "ens37" counter packets 0 bytes 0 accept
+		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "docker-iot" oifname "docker-iot" counter packets 0 bytes 0 accept
+		oifname "docker-iot" counter packets 0 bytes 0 drop
+		oifname "docker0" counter packets 0 bytes 0 drop
+	}
+
+	chain DOCKER-USER {
+	}
+}
+table ip nat {
+	chain PREROUTING {
+		type nat hook prerouting priority dstnat; policy accept;
+		fib daddr type local counter packets 4973 bytes 364598 jump DOCKER
+	}
+
+	chain INPUT {
+		type nat hook input priority srcnat; policy accept;
+	}
+
+	chain OUTPUT {
+		type nat hook output priority dstnat; policy accept;
+		ip daddr != 127.0.0.0/8 fib daddr type local counter packets 1 bytes 60 jump DOCKER
+	}
+
+	chain POSTROUTING {
+		type nat hook postrouting priority srcnat; policy accept;
+		ip saddr 172.17.0.0/16 oifname != "docker0" counter packets 0 bytes 0 masquerade
+		ip saddr 192.168.20.0/24 oifname != "docker-iot" counter packets 2 bytes 144 masquerade
+		ip saddr 192.168.10.0/24 oifname "docker-iot" counter packets 5813 bytes 221184 masquerade
+		ip saddr 192.168.10.0/24 counter packets 0 bytes 0 masquerade
+	}
+
+	chain DOCKER {
+		iifname "docker-iot" counter packets 0 bytes 0 return
+		iifname "docker0" counter packets 0 bytes 0 return
+	}
+}
+table ip6 filter {
+	chain INPUT {
+		type filter hook input priority filter; policy accept;
+	}
+
+	chain FORWARD {
+		type filter hook forward priority filter; policy accept;
+		counter packets 0 bytes 0 jump DOCKER-USER
+		counter packets 0 bytes 0 jump DOCKER-FORWARD
+	}
+
+	chain OUTPUT {
+		type filter hook output priority filter; policy accept;
+	}
+
+	chain DOCKER-FORWARD {
+		counter packets 0 bytes 0 jump DOCKER-CT
+		counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-1
+		counter packets 0 bytes 0 jump DOCKER-BRIDGE
+	}
+
+	chain DOCKER-USER {
+	}
+
+	chain DOCKER {
+	}
+
+	chain DOCKER-BRIDGE {
+	}
+
+	chain DOCKER-CT {
+	}
+
+	chain DOCKER-ISOLATION-STAGE-1 {
+	}
+
+	chain DOCKER-ISOLATION-STAGE-2 {
+	}
+}
+table ip6 nat {
+	chain PREROUTING {
+		type nat hook prerouting priority dstnat; policy accept;
+		fib daddr type local counter packets 0 bytes 0 jump DOCKER
+	}
+
+	chain INPUT {
+		type nat hook input priority srcnat; policy accept;
+	}
+
+	chain OUTPUT {
+		type nat hook output priority dstnat; policy accept;
+		ip6 daddr != ::1 fib daddr type local counter packets 0 bytes 0 jump DOCKER
+	}
+
+	chain POSTROUTING {
+		type nat hook postrouting priority srcnat; policy accept;
+	}
+
+	chain DOCKER {
+	}
+}

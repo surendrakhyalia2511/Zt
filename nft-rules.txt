@@ -20,11 +20,11 @@ table ip filter {
 
 	chain FORWARD {
 		type filter hook forward priority filter; policy accept;
-		ip saddr 192.168.20.0/24 ip daddr 192.168.20.0/24 counter packets 18 bytes 1080 drop
-		counter packets 13124 bytes 16857287 jump DOCKER-USER
-		counter packets 13124 bytes 16857287 jump DOCKER-FORWARD
-		iifname "ens37" oifname "ens33" counter packets 6665 bytes 363704 accept
-		iifname "ens33" oifname "ens37" counter packets 5713 bytes 310433 accept
+		ip saddr 192.168.20.0/24 ip daddr 192.168.20.0/24 counter packets 72 bytes 4320 drop
+		counter packets 7680 bytes 415741 jump DOCKER-USER
+		counter packets 7680 bytes 415741 jump DOCKER-FORWARD
+		iifname "ens37" oifname "ens33" counter packets 3578 bytes 195344 accept
+		iifname "ens33" oifname "ens37" counter packets 3070 bytes 166873 accept
 		iifname "ens37" udp dport 53 counter packets 0 bytes 0 accept
 		iifname "ens37" tcp dport 53 counter packets 0 bytes 0 accept
 		ct state related,established counter packets 0 bytes 0 accept
@@ -45,7 +45,7 @@ table ip filter {
 	}
 
 	chain DOCKER {
-		iifname "ens37" oifname "docker-iot" counter packets 0 bytes 0 accept
+		iifname "ens37" oifname "docker-iot" counter packets 21 bytes 1764 accept
 		iifname != "docker-quar" oifname "docker-quar" counter packets 0 bytes 0 drop
 		iifname != "docker-iot" oifname "docker-iot" counter packets 0 bytes 0 drop
 		iifname != "docker0" oifname "docker0" counter packets 0 bytes 0 drop
@@ -53,28 +53,28 @@ table ip filter {
 
 	chain DOCKER-BRIDGE {
 		oifname "docker-quar" counter packets 0 bytes 0 jump DOCKER
-		oifname "docker-iot" counter packets 0 bytes 0 jump DOCKER
+		oifname "docker-iot" counter packets 21 bytes 1764 jump DOCKER
 		oifname "docker0" counter packets 0 bytes 0 jump DOCKER
 	}
 
 	chain DOCKER-CT {
 		oifname "docker-quar" ct state related,established counter packets 0 bytes 0 accept
-		oifname "docker-iot" ct state related,established counter packets 590 bytes 16173998 accept
+		oifname "docker-iot" ct state related,established counter packets 477 bytes 19168 accept
 		oifname "docker0" ct state related,established counter packets 0 bytes 0 accept
 	}
 
 	chain DOCKER-FORWARD {
-		counter packets 13124 bytes 16857287 jump DOCKER-CT
-		counter packets 12534 bytes 683289 jump DOCKER-ISOLATION-STAGE-1
-		counter packets 12534 bytes 683289 jump DOCKER-BRIDGE
+		counter packets 7680 bytes 415741 jump DOCKER-CT
+		counter packets 7203 bytes 396573 jump DOCKER-ISOLATION-STAGE-1
+		counter packets 7203 bytes 396573 jump DOCKER-BRIDGE
 		iifname "docker-quar" counter packets 0 bytes 0 accept
-		iifname "docker-iot" counter packets 156 bytes 9152 accept
+		iifname "docker-iot" counter packets 534 bytes 32592 accept
 		iifname "docker0" counter packets 0 bytes 0 accept
 	}
 
 	chain DOCKER-ISOLATION-STAGE-1 {
 		iifname "docker-quar" oifname != "docker-quar" counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-2
-		iifname "docker-iot" oifname != "docker-iot" counter packets 156 bytes 9152 jump DOCKER-ISOLATION-STAGE-2
+		iifname "docker-iot" oifname != "docker-iot" counter packets 534 bytes 32592 jump DOCKER-ISOLATION-STAGE-2
 		iifname "docker0" oifname != "docker0" counter packets 0 bytes 0 jump DOCKER-ISOLATION-STAGE-2
 	}
 
@@ -86,45 +86,42 @@ table ip filter {
 	}
 
 	chain DOCKER-USER {
-		ip saddr 192.168.20.6 iifname "docker-iot" ct state new meter energymete-hc { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.6 iifname "docker-iot" ct state new meter energymete-sc { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.16 iifname "docker-iot" ct state new meter lighting-hc { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.16 iifname "docker-iot" ct state new meter lighting-sc { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.4 iifname "docker-iot" ct state new meter sensorhub-hc { ip saddr timeout 60s limit rate over 12/minute burst 4 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.4 iifname "docker-iot" ct state new meter sensorhub-sc { ip saddr timeout 60s limit rate over 8/minute burst 4 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.9 iifname "docker-iot" ct state new meter tv1-hc { ip saddr timeout 60s limit rate over 20/minute } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.9 iifname "docker-iot" ct state new meter tv1-sc { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.11 iifname "docker-iot" ct state new meter thermo1-hc { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.11 iifname "docker-iot" ct state new meter thermo1-sc { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.5 iifname "docker-iot" ct state new meter nvr-hc { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.5 iifname "docker-iot" ct state new meter nvr-sc { ip saddr timeout 60s limit rate over 10/minute } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.12 iifname "docker-iot" ct state new meter envsensor-hc { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.12 iifname "docker-iot" ct state new meter envsensor-sc { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.7 iifname "docker-iot" ct state new meter bulb1-hc { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.7 iifname "docker-iot" ct state new meter bulb1-sc { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.13 iifname "docker-iot" ct state new meter chromecast-hc { ip saddr timeout 60s limit rate over 28/minute burst 8 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.13 iifname "docker-iot" ct state new meter chromecast-sc { ip saddr timeout 60s limit rate over 20/minute burst 8 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.14 iifname "docker-iot" ct state new meter cam1-hc { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.14 iifname "docker-iot" ct state new meter cam1-sc { ip saddr timeout 60s limit rate over 10/minute } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.8 iifname "docker-iot" ct state new meter plug1-hc { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.8 iifname "docker-iot" ct state new meter plug1-sc { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.2 iifname "docker-iot" ct state new meter badge-hc { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.2 iifname "docker-iot" ct state new meter badge-sc { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.3 iifname "docker-iot" ct state new meter nas-hc { ip saddr timeout 60s limit rate over 20/minute } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.3 iifname "docker-iot" ct state new meter nas-sc { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.10 iifname "docker-iot" ct state new meter lock1-hc { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.10 iifname "docker-iot" ct state new meter lock1-sc { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
-		ip saddr 192.168.20.15 iifname "docker-iot" ct state new meter printer-hc { ip saddr timeout 60s limit rate over 5/minute burst 2 packets } counter packets 0 bytes 0 meta mark set 0x20
-		ip saddr 192.168.20.15 iifname "docker-iot" ct state new meter printer-sc { ip saddr timeout 60s limit rate over 3/minute burst 2 packets } counter packets 0 bytes 0 meta mark set 0x10
-		iifname "docker-iot" oifname "docker-iot" counter packets 0 bytes 0 drop
-		iifname "docker-iot" oifname "ens37" ct state related,established counter packets 0 bytes 0 accept
-		iifname "docker-iot" oifname "ens37" counter packets 0 bytes 0 drop
+		ip saddr 192.168.20.15 ct state new meter energymeteh-rl { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.15 ct state new meter energymetes-rl { ip saddr timeout 60s limit rate over 10/minute } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.12 ct state new meter plug1h-rl { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.12 ct state new meter plug1s-rl { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.8 ct state new meter printerh-rl { ip saddr timeout 60s limit rate over 40/minute burst 10 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.8 ct state new meter printers-rl { ip saddr timeout 60s limit rate over 30/minute burst 10 packets } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.5 ct state new meter badgeh-rl { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.5 ct state new meter badges-rl { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.4 ct state new meter cam1h-rl { ip saddr timeout 60s limit rate over 10/second burst 100 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.4 ct state new meter cam1s-rl { ip saddr timeout 60s limit rate over 500/minute burst 100 packets } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.3 ct state new meter nash-rl { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.3 ct state new meter nass-rl { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.2 ct state new meter nvrh-rl { ip saddr timeout 60s limit rate over 10/second burst 100 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.2 ct state new meter nvrs-rl { ip saddr timeout 60s limit rate over 500/minute burst 100 packets } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.10 ct state new meter lightingh-rl { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.10 ct state new meter lightings-rl { ip saddr timeout 60s limit rate over 10/minute } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.7 ct state new meter sensorhubh-rl { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.7 ct state new meter sensorhubs-rl { ip saddr timeout 60s limit rate over 10/minute } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.6 ct state new meter tv1h-rl { ip saddr timeout 60s limit rate over 250/minute burst 50 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.6 ct state new meter tv1s-rl { ip saddr timeout 60s limit rate over 200/minute burst 50 packets } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.14 ct state new meter thermo1h-rl { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.14 ct state new meter thermo1s-rl { ip saddr timeout 60s limit rate over 10/minute } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.11 ct state new meter envsensorh-rl { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.11 ct state new meter envsensors-rl { ip saddr timeout 60s limit rate over 10/minute } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.16 ct state new meter bulb1h-rl { ip saddr timeout 60s limit rate over 15/minute } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.16 ct state new meter bulb1s-rl { ip saddr timeout 60s limit rate over 10/minute } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.13 ct state new meter chromecasth-rl { ip saddr timeout 60s limit rate over 6/second burst 60 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.13 ct state new meter chromecasts-rl { ip saddr timeout 60s limit rate over 5/second burst 60 packets } counter packets 0 bytes 0 meta mark set 0x10
+		ip saddr 192.168.20.9 ct state new meter lock1h-rl { ip saddr timeout 60s limit rate over 8/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x20
+		ip saddr 192.168.20.9 ct state new meter lock1s-rl { ip saddr timeout 60s limit rate over 5/minute burst 3 packets } counter packets 0 bytes 0 meta mark set 0x10
 	}
 }
 table ip nat {
 	chain PREROUTING {
 		type nat hook prerouting priority dstnat; policy accept;
-		fib daddr type local counter packets 14 bytes 321851 jump DOCKER
+		fib daddr type local counter packets 454 bytes 23608 jump DOCKER
 	}
 
 	chain INPUT {
@@ -139,9 +136,9 @@ table ip nat {
 	chain POSTROUTING {
 		type nat hook postrouting priority srcnat; policy accept;
 		ip saddr 172.17.0.0/16 oifname != "docker0" counter packets 0 bytes 0 masquerade
-		ip saddr 192.168.20.0/24 oifname != "docker-iot" counter packets 32 bytes 1920 masquerade
+		ip saddr 192.168.20.0/24 oifname != "docker-iot" counter packets 475 bytes 28500 masquerade
 		ip saddr 192.168.30.0/24 oifname != "docker-quar" counter packets 0 bytes 0 masquerade
-		ip saddr 192.168.10.0/24 oifname "ens33" counter packets 952 bytes 57120 masquerade
+		ip saddr 192.168.10.0/24 oifname "ens33" counter packets 512 bytes 30720 masquerade
 	}
 
 	chain DOCKER {

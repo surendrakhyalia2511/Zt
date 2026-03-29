@@ -1,16 +1,16 @@
 CONTAINER ID   IMAGE               COMMAND                  CREATED       STATUS       PORTS      NAMES
-9ef60339e6ed   eclipse-mosquitto   "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   1883/tcp   lighting
-9af693d38d95   nginx               "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   80/tcp     tv1
-9f23560d3a00   nginx               "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   80/tcp     lock1
-361fdcde7ce7   eclipse-mosquitto   "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   1883/tcp   thermo1
-3fc75e6d58de   nginx               "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   80/tcp     badge
-f2a87c220ea2   nginx               "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   80/tcp     nas
-8c3f4602d8e2   olbat/cupsd         "/usr/sbin/cupsd -f"     3 weeks ago   Up 3 hours   631/tcp    printer
-b67d8303b68c   httpd               "httpd-foreground"       3 weeks ago   Up 3 hours   80/tcp     energymeter
-d06f2aff140e   nginx               "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   80/tcp     nvr
-efd9728dd694   eclipse-mosquitto   "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   1883/tcp   bulb1
-c0509a7fdd38   eclipse-mosquitto   "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   1883/tcp   envsensor
-8a1e09f77c39   nginx               "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   80/tcp     sensorhub
-02df9d392e7e   nginx               "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   80/tcp     chromecast
-e0d7605afdaf   httpd               "httpd-foreground"       3 weeks ago   Up 3 hours   80/tcp     plug1
-bc2fd81f0051   nginx               "/docker-entrypoint.…"   3 weeks ago   Up 3 hours   80/tcp     cam1
+9ef60339e6ed   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   lighting
+9af693d38d95   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     tv1
+9f23560d3a00   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     lock1
+361fdcde7ce7   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   thermo1
+3fc75e6d58de   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     badge
+f2a87c220ea2   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     nas
+8c3f4602d8e2   olbat/cupsd         "/usr/sbin/cupsd -f"     4 weeks ago   Up 2 hours   631/tcp    printer
+b67d8303b68c   httpd               "httpd-foreground"       4 weeks ago   Up 2 hours   80/tcp     energymeter
+d06f2aff140e   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     nvr
+efd9728dd694   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   bulb1
+c0509a7fdd38   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   envsensor
+8a1e09f77c39   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     sensorhub
+02df9d392e7e   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     chromecast
+e0d7605afdaf   httpd               "httpd-foreground"       4 weeks ago   Up 2 hours   80/tcp     plug1
+bc2fd81f0051   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     cam1

@@ -17,9 +17,17 @@ Score deductions:
   -10  Rate SOFT violation (buffer zone)
   -35  Rate HARD violation (ceiling exceeded) → score drops below 40 → quarantine
   -50  East-west lateral movement attempt → immediate quarantine
+
+Persistent score:
+  Score is saved to device_history.json after every cycle.
+  Fields saved: trust_score, score_reasons, score_updated_at, score_history[]
+  score_history keeps last 20 scores for trend analysis in dashboard.
 """
 
-SCORE_THRESHOLD = 40
+from datetime import datetime
+
+SCORE_THRESHOLD  = 40
+MAX_SCORE_HISTORY = 20    # keep last N scores per device
 
 
 def calculate_trust_score(device):
@@ -76,15 +84,68 @@ def calculate_trust_score(device):
         reasons.append("Currently in quarantine (-30)")
 
     # ── Rate limit penalty ────────────────────────────────────
-    # SOFT = -10 (recoverable, stays TRUSTED)
-    # HARD = -35 (permanent, drops below threshold → quarantine)
     rl_penalty = device.get("rl_penalty", 0)
     if rl_penalty > 0:
         zone_label = "buffer" if rl_penalty == 10 else "exceeded"
         score -= rl_penalty
         reasons.append(f"Rate violation [{zone_label}] (-{rl_penalty})")
 
-    return score, reasons
+    return max(0, score), reasons
+
+
+def persist_score(device: dict, score: int, reasons: list) -> dict:
+    """
+    Save the calculated score back into the device history dict.
+    Updates trust_score, score_reasons, score_updated_at, score_history.
+
+    Args:
+        device  : device history dict (modified in place)
+        score   : calculated trust score
+        reasons : list of reason strings
+
+    Returns:
+        device dict with score fields updated
+    """
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Update current score fields
+    device["trust_score"]      = score
+    device["score_reasons"]    = reasons
+    device["score_updated_at"] = now
+
+    # Append to rolling score history
+    history = device.get("score_history", [])
+    history.append({
+        "score":  score,
+        "ts":     now,
+        "reason": reasons[0] if reasons else "",
+    })
+
+    # Keep only last N entries
+    if len(history) > MAX_SCORE_HISTORY:
+        history = history[-MAX_SCORE_HISTORY:]
+
+    device["score_history"] = history
+
+    # Track min/max/baseline for trend detection
+    scores = [h["score"] for h in history]
+    device["score_min"]  = min(scores)
+    device["score_max"]  = max(scores)
+    device["score_avg"]  = round(sum(scores) / len(scores), 1)
+
+    # Trend: compare current to previous score
+    if len(history) >= 2:
+        prev = history[-2]["score"]
+        if score < prev:
+            device["score_trend"] = "down"
+        elif score > prev:
+            device["score_trend"] = "up"
+        else:
+            device["score_trend"] = "stable"
+    else:
+        device["score_trend"] = "stable"
+
+    return device
 
 
 def get_status(score, quarantined):
@@ -99,3 +160,8 @@ def get_status(score, quarantined):
         return "✅ TRUSTED"
     else:
         return "🚨 QUARANTINE"
+
+
+def get_trend_arrow(trend: str) -> str:
+    """Return visual trend indicator."""
+    return {"up": "↑", "down": "↓", "stable": "→"}.get(trend, "→")
