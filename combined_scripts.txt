@@ -1,0 +1,1411 @@
+========== behavior_monitor.sh ==========
+#!/bin/bash
+# behavior_monitor.sh
+# Zero Trust IoT Gateway — Continuous Background Behavioral Monitor
+#
+# BUG FIXES:
+#   1. declare -A arrays must be declared OUTSIDE the capture parse section
+#      and explicitly unset+redeclared each iteration — bash associative
+#      arrays declared inside process substitution or subshells are lost.
+#   2. East-west events now written even for count=1 (not just count>=threshold)
+#      since ANY IoT→IoT traffic is suspicious lateral movement.
+#   3. Added explicit unset before each redeclare to avoid stale entries
+#      accumulating across loop iterations.
+#   4. grep -c can return exit code 1 (no matches) which stops script with
+#      set -e — use `|| true` guards.
+
+EVENTS_FILE="/var/run/zt-monitor-events.jsonl"
+LOG_FILE="/var/log/zt-behavior.log"
+IOT_NET="192.168.20"
+TRUSTED_NET="192.168.10"
+SCAN_THRESHOLD=3
+CAPTURE_WINDOW=2   # seconds per capture
+
+# ── Ensure events file exists and is writable ────────────────
+touch "$EVENTS_FILE"
+chmod 666 "$EVENTS_FILE"
+
+_log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [MONITOR] $1" | tee -a "$LOG_FILE"
+}
+
+_write_event() {
+    echo "$1" >> "$EVENTS_FILE"
+}
+
+_log "Behavioral monitor started (PID=$$)"
+_log "Watching ens37 (external scan) + docker-iot (east-west)"
+_log "Events file: $EVENTS_FILE"
+_log "Capture window: ${CAPTURE_WINDOW}s  Scan threshold: ${SCAN_THRESHOLD}"
+
+# ── Main monitoring loop ─────────────────────────────────────
+while true; do
+
+    TS=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # ── Capture 1: ens37 — external attacker scanning IoT ────
+    # BUG FIX: capture from TRUSTED_NET (Kali/attack machine) to IoT
+    ENS37_OUT=$(timeout "$CAPTURE_WINDOW" tcpdump \
+        -i ens37 -nn -q \
+        "src net ${TRUSTED_NET}.0/24 and dst net ${IOT_NET}.0/24" \
+        2>/dev/null) || true
+
+    # BUG FIX: declare -A OUTSIDE the while-read loop, unset first
+    unset SCAN_MAP
+    declare -A SCAN_MAP
+
+    while IFS= read -r line; do
+        [[ "$line" != *"IP"* ]] && continue
+        # Parse: "HH:MM:SS.us IP src.port > dst.port: ..."
+        src=$(echo "$line" | grep -oP '(?<=IP )[\d.]+' | head -1)
+        dst=$(echo "$line" | grep -oP '(?<=> )[\d.]+' | head -1)
+        if [[ -n "$src" && -n "$dst" ]]; then
+            # Strip port from IPs (tcpdump shows 192.168.20.3.80 format)
+            src_ip=$(echo "$src" | cut -d. -f1-4)
+            dst_ip=$(echo "$dst" | cut -d. -f1-4)
+            if [[ "$src_ip" == ${TRUSTED_NET}.* && "$dst_ip" == ${IOT_NET}.* ]]; then
+                # Build space-separated unique dst list per src
+                if [[ -z "${SCAN_MAP[$src_ip]+x}" ]]; then
+                    SCAN_MAP[$src_ip]="$dst_ip"
+                elif [[ "${SCAN_MAP[$src_ip]}" != *"$dst_ip"* ]]; then
+                    SCAN_MAP[$src_ip]+=" $dst_ip"
+                fi
+            fi
+        fi
+    done <<< "$ENS37_OUT"
+
+    for src_ip in "${!SCAN_MAP[@]}"; do
+        unique_dsts=$(echo "${SCAN_MAP[$src_ip]}" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
+        count=$(echo "${SCAN_MAP[$src_ip]}" | tr ' ' '\n' | sort -u | grep -cv '^$' || true)
+
+        if [[ "$count" -ge "$SCAN_THRESHOLD" ]]; then
+            targets_json=$(echo "$unique_dsts" | tr ' ' '\n' | grep -v '^$' | \
+                python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null \
+                || echo '[]')
+
+            event="{\"type\":\"SCAN\",\"src_ip\":\"${src_ip}\",\"targets\":${targets_json},\"count\":${count},\"ts\":\"${TS}\"}"
+            _write_event "$event"
+            _log "SCAN DETECTED: ${src_ip} → ${count} IoT devices"
+        fi
+    done
+
+    # ── Capture 2: docker-iot — east-west lateral movement ───
+    BRIDGE_OUT=$(timeout "$CAPTURE_WINDOW" tcpdump \
+        -i docker-iot -nn -q -c 500 \
+        "src net ${IOT_NET}.0/24 and dst net ${IOT_NET}.0/24" \
+        2>/dev/null) || true
+
+    # BUG FIX: unset before redeclare each iteration
+    unset EW_MAP
+    declare -A EW_MAP
+
+    while IFS= read -r line; do
+        [[ "$line" != *"IP"* ]] && continue
+        src=$(echo "$line" | grep -oP '(?<=IP )[\d.]+' | head -1)
+        dst=$(echo "$line" | grep -oP '(?<=> )[\d.]+' | head -1)
+        if [[ -n "$src" && -n "$dst" ]]; then
+            src_ip=$(echo "$src" | cut -d. -f1-4)
+            dst_ip=$(echo "$dst" | cut -d. -f1-4)
+            if [[ "$src_ip" == ${IOT_NET}.* && "$dst_ip" == ${IOT_NET}.* && "$src_ip" != "$dst_ip" ]]; then
+                if [[ -z "${EW_MAP[$src_ip]+x}" ]]; then
+                    EW_MAP[$src_ip]="$dst_ip"
+                elif [[ "${EW_MAP[$src_ip]}" != *"$dst_ip"* ]]; then
+                    EW_MAP[$src_ip]+=" $dst_ip"
+                fi
+            fi
+        fi
+    done <<< "$BRIDGE_OUT"
+
+    for src_ip in "${!EW_MAP[@]}"; do
+        unique_dsts=$(echo "${EW_MAP[$src_ip]}" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
+        count=$(echo "${EW_MAP[$src_ip]}" | tr ' ' '\n' | sort -u | grep -cv '^$' || true)
+
+        if [[ "$count" -ge 1 ]]; then
+            dst_json=$(echo "$unique_dsts" | tr ' ' '\n' | grep -v '^$' | \
+                python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))" 2>/dev/null \
+                || echo '[]')
+
+            event="{\"type\":\"EAST_WEST\",\"src_ip\":\"${src_ip}\",\"dst_ips\":${dst_json},\"count\":${count},\"ts\":\"${TS}\"}"
+            _write_event "$event"
+            _log "EAST-WEST: ${src_ip} → ${count} IoT device(s): ${unique_dsts}"
+        fi
+    done
+
+    # Short sleep to avoid spinning at 100% CPU between captures
+    sleep 0.1
+
+done
+
+========== quarantine_device.sh ==========
+#!/bin/bash
+# quarantine_device.sh
+# Usage: ./quarantine_device.sh <container_name> [ip_address]
+# BUG FIX: was only reading $1 (container), ignoring $2 (ip)
+# dashboard_api.py and quarantine_manager.py both pass ip as $2
+# The ip arg is used here for logging; iptables cleanup is handled
+# by rate_limit_manager.remove_limit() called from quarantine_manager.py
+
+CONTAINER=$1
+IP=${2:-"unknown"}
+
+if [ -z "$CONTAINER" ]; then
+    echo "Usage: ./quarantine_device.sh <container_name> [ip_address]"
+    exit 1
+fi
+
+echo "🚨 Quarantining $CONTAINER (IP: $IP)..."
+
+# Disconnect from IoT network (ignore error if not connected)
+docker network disconnect iot-lan "$CONTAINER" 2>/dev/null || true
+
+# Connect to quarantine network (ignore error if already connected)
+docker network connect quarantine-lan "$CONTAINER" 2>/dev/null
+
+if [ $? -eq 0 ]; then
+    echo "✅ $CONTAINER moved to quarantine network (192.168.30.0/24)"
+    echo "❌ IoT LAN access blocked"
+    echo "✅ Quarantine network connected"
+else
+    echo "⚠️  docker network connect failed — container may already be quarantined"
+fi
+
+# Flush nft raw PREROUTING to avoid stale drop rules interfering with monitoring
+nft flush chain ip raw PREROUTING 2>/dev/null || true
+
+echo "✅ Quarantine complete for $CONTAINER"
+
+========== restore_device.sh ==========
+#!/bin/bash
+CONTAINER=$1
+
+echo "✅ Restoring $CONTAINER to IoT network..."
+docker network disconnect quarantine-lan $CONTAINER
+docker network connect iot-lan $CONTAINER
+
+# Reset quarantined flag in device_history.json
+python3 -c "
+import json, sys
+name = '$1'
+try:
+    with open('/home/sk/device_history.json') as f:
+        h = json.load(f)
+    if name in h:
+        h[name]['quarantined']   = False
+        h[name]['under_attack']  = False
+        with open('/home/sk/device_history.json', 'w') as f:
+            json.dump(h, f, indent=2)
+        print(f'History reset for {name}')
+except Exception as e:
+    print(f'History reset skipped: {e}')
+" 2>/dev/null
+
+
+
+echo "✅ $CONTAINER restored to IoT network (192.168.20.0/24)"
+
+
+
+nft flush chain ip raw PREROUTING
+echo "✅ nftables raw rules flushed"
+
+========== setup_https.sh ==========
+#!/bin/bash
+# setup_https.sh
+# Zero Trust IoT Gateway — HTTPS Setup (Self-Signed Certificate)
+#
+# Generates a self-signed TLS certificate valid for 10 years.
+# Configures uvicorn to serve HTTPS on port 8443.
+# Updates dashboard.html WebSocket URL from ws:// to wss://
+#
+# Usage:
+#   sudo bash setup_https.sh
+
+set -e
+
+CERT_DIR="/home/sk/certs"
+CERT_FILE="$CERT_DIR/gateway.crt"
+KEY_FILE="$CERT_DIR/gateway.key"
+GATEWAY_IP=$(hostname -I | awk '{print $1}')
+
+echo "================================================"
+echo " ZeroTrust Gateway — HTTPS Setup"
+echo "================================================"
+echo " Gateway IP : $GATEWAY_IP"
+echo " Cert dir   : $CERT_DIR"
+echo ""
+
+# ── Step 1: Create cert directory ────────────────────────────
+mkdir -p "$CERT_DIR"
+chmod 700 "$CERT_DIR"
+
+# ── Step 2: Generate self-signed certificate ──────────────────
+echo "[1/4] Generating self-signed TLS certificate..."
+
+openssl req -x509 -newkey rsa:4096 \
+    -keyout "$KEY_FILE" \
+    -out    "$CERT_FILE" \
+    -days   3650 \
+    -nodes \
+    -subj "/C=IN/ST=Home/L=Gateway/O=ZeroTrust/CN=ztgateway" \
+    -addext "subjectAltName=IP:$GATEWAY_IP,IP:127.0.0.1,DNS:ztgateway,DNS:localhost" \
+    2>/dev/null
+
+chmod 600 "$KEY_FILE"
+chmod 644 "$CERT_FILE"
+
+echo "    ✅ Certificate generated"
+echo "    📄 Cert : $CERT_FILE"
+echo "    🔑 Key  : $KEY_FILE"
+echo "    📅 Valid: 10 years"
+echo "    🌐 SAN  : IP:$GATEWAY_IP, IP:127.0.0.1"
+
+# ── Step 3: Show cert fingerprint ────────────────────────────
+echo ""
+echo "[2/4] Certificate fingerprint (trust this in browser):"
+openssl x509 -in "$CERT_FILE" -fingerprint -sha256 -noout 2>/dev/null | \
+    sed 's/SHA256 Fingerprint=/    SHA256: /'
+
+# ── Step 4: Create uvicorn HTTPS start script ─────────────────
+echo ""
+echo "[3/4] Creating HTTPS start script..."
+
+cat > /home/sk/start_dashboard.sh << SCRIPT
+#!/bin/bash
+# start_dashboard.sh
+# Starts ZeroTrust dashboard API with HTTPS
+
+CERT="/home/sk/certs/gateway.crt"
+KEY="/home/sk/certs/gateway.key"
+
+echo "Starting ZeroTrust Dashboard (HTTPS)..."
+echo "Access at: https://$(hostname -I | awk '{print $1}'):8443"
+echo ""
+
+cd /home/sk
+uvicorn dashboard_api:app \\
+    --host 0.0.0.0 \\
+    --port 8443 \\
+    --ssl-certfile "\$CERT" \\
+    --ssl-keyfile  "\$KEY" \\
+    --log-level info
+SCRIPT
+
+chmod +x /home/sk/start_dashboard.sh
+echo "    ✅ Start script: /home/sk/start_dashboard.sh"
+
+# ── Step 5: Update systemd service if it exists ───────────────
+echo ""
+echo "[4/4] Checking systemd service..."
+
+SERVICE_FILE="/etc/systemd/system/zt-dashboard.service"
+cat > "$SERVICE_FILE" << SERVICE
+[Unit]
+Description=ZeroTrust Dashboard API (HTTPS)
+After=network.target zt-lab-init.service
+Wants=zt-lab-init.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/sk
+ExecStart=/usr/local/bin/uvicorn dashboard_api:app \
+    --host 0.0.0.0 \
+    --port 8443 \
+    --ssl-certfile /home/sk/certs/gateway.crt \
+    --ssl-keyfile  /home/sk/certs/gateway.key \
+    --log-level info
+Restart=always
+RestartSec=5
+Environment=PYTHONPATH=/home/sk
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable zt-dashboard.service
+echo "    ✅ systemd service created and enabled"
+
+# ── Done ──────────────────────────────────────────────────────
+echo ""
+echo "================================================"
+echo " HTTPS Setup Complete"
+echo "================================================"
+echo ""
+echo " Start now    : sudo bash /home/sk/start_dashboard.sh"
+echo " Or via systemd: sudo systemctl start zt-dashboard"
+echo ""
+echo " Access URL   : https://$GATEWAY_IP:8443"
+echo ""
+echo " ⚠️  BROWSER WARNING: Click 'Advanced' → 'Proceed'"
+echo "    This is normal for self-signed certificates."
+echo "    On Chrome: type 'thisisunsafe' to bypass."
+echo ""
+echo " 📱 iOS/Android: Install cert to trust it fully:"
+echo "    curl http://$GATEWAY_IP:8000/static/gateway.crt -o gateway.crt"
+echo "    Then open the .crt file on your device"
+echo ""
+
+========== zt-lab-init.sh ==========
+#!/bin/bash
+exec >> /var/log/zt-lab-init.log 2>&1
+echo "=== ZT Lab Init $(date) ==="
+
+sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.bridge.bridge-nf-call-iptables=1
+
+sleep 10
+
+cd /home/sk
+docker compose up -d
+echo "Docker compose exit: $?"
+
+sleep 5
+netfilter-persistent reload
+echo "Firewall reload exit: $?"
+echo "=== Init complete ==="
+
+========== dashboard.html ==========
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>ZeroTrust Home</title>
+<link rel="manifest" href="/manifest.json">
+<script src="/static/react.min.js"></script>
+<script src="/static/react-dom.min.js"></script>
+<script src="/static/babel.min.js"></script>
+<style>
+:root {
+  --bg:#080d14; --surface:#0d1520; --surface2:#111d2e; --border:#1a2d45;
+  --accent:#00d4ff; --accent2:#00ff88; --warn:#ffb800; --danger:#ff3b5c;
+  --text:#c8ddf0; --textdim:#6a8aaa; --muted:#4a6585;
+  --shadow:0 2px 12px rgba(0,0,0,0.4); --radius:16px; --radius-sm:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+#root{height:100%;display:flex;flex-direction:column}
+.login-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;background:linear-gradient(160deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%);min-height:100vh}
+.login-logo{width:80px;height:80px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:24px;display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:24px;box-shadow:0 16px 40px rgba(14,165,233,0.4)}
+.login-title{font-size:28px;font-weight:700;color:#fff;margin-bottom:6px;letter-spacing:-0.5px}
+.login-sub{font-size:14px;color:rgba(255,255,255,0.5);margin-bottom:40px;letter-spacing:2px;text-transform:uppercase}
+.login-form{width:100%;max-width:340px;display:flex;flex-direction:column;gap:12px}
+.login-input{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius-sm);padding:16px 18px;font-size:16px;color:#fff;outline:none;transition:border-color 0.2s;-webkit-appearance:none}
+.login-input::placeholder{color:rgba(255,255,255,0.35)}
+.login-input:focus{border-color:var(--accent)}
+.login-btn{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:16px;font-size:16px;font-weight:600;cursor:pointer;margin-top:4px;transition:all 0.15s;box-shadow:0 4px 16px rgba(0,212,255,0.3)}
+.login-btn:active{transform:scale(0.98)}
+.login-btn:disabled{opacity:0.6}
+.login-error{text-align:center;color:#fca5a5;font-size:13px;padding:8px}
+.app{height:100%;display:flex;flex-direction:column}
+.header{background:rgba(8,13,20,0.95);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:sticky;top:0;z-index:50;box-shadow:var(--shadow);backdrop-filter:blur(12px)}
+.header-logo{display:flex;align-items:center;gap:10px}
+.header-icon{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.header-title{font-size:17px;font-weight:700;letter-spacing:-0.3px}
+.header-sub{font-size:11px;color:var(--muted)}
+.header-status{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.status-secure{background:rgba(0,255,136,0.1);color:var(--accent2)}
+.status-alert{background:rgba(255,59,92,0.1);color:var(--danger)}
+.pulse{width:7px;height:7px;border-radius:50%;animation:pulse 2s infinite}
+.pulse-green{background:var(--accent2);box-shadow:0 0 6px var(--accent2)}
+.pulse-red{background:var(--danger);box-shadow:0 0 6px var(--danger)}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.8)}}
+.content{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px;padding-bottom:80px}
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+.stat-card{background:var(--surface);border-radius:var(--radius-sm);padding:14px 10px;text-align:center;box-shadow:var(--shadow);border:1px solid var(--border)}
+.stat-val{font-size:26px;font-weight:800;line-height:1;margin-bottom:3px}
+.stat-label{font-size:10px;color:var(--muted);font-weight:600;letter-spacing:0.5px;text-transform:uppercase}
+.color-blue{color:var(--accent)}.color-green{color:var(--accent2)}.color-warn{color:var(--warn)}.color-danger{color:var(--danger)}
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:4px}
+.section-title{font-size:13px;font-weight:700;color:var(--textdim);letter-spacing:0.5px;text-transform:uppercase}
+.section-count{font-size:11px;color:var(--muted);background:var(--border);padding:2px 8px;border-radius:10px}
+.lan-zone{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:10px}
+.zone-iot{background:rgba(0,212,255,0.1);color:var(--accent);border:1px solid rgba(0,212,255,0.2)}
+.zone-quar{background:rgba(255,59,92,0.1);color:var(--danger);border:1px solid rgba(255,59,92,0.2)}
+.device-list{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+.device-row{background:var(--surface);border-radius:var(--radius-sm);padding:14px 16px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow);transition:all 0.15s;cursor:pointer;border:1.5px solid var(--border)}
+.device-row:active{transform:scale(0.99)}
+.device-row.quarantined{border-color:rgba(255,59,92,0.3);background:rgba(255,59,92,0.02)}
+.device-row.at-risk{border-color:rgba(255,184,0,0.3)}
+.device-icon-wrap{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.icon-normal{background:rgba(0,212,255,0.1)}
+.icon-quarantine{background:rgba(255,59,92,0.12)}
+.icon-warn{background:rgba(255,184,0,0.1)}
+.device-info{flex:1;min-width:0}
+.device-name{font-size:15px;font-weight:600;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.device-meta{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.device-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.score-badge{padding:3px 9px;border-radius:8px;font-size:13px;font-weight:700}
+.score-good{background:rgba(0,255,136,0.1);color:var(--accent2)}
+.score-warn{background:rgba(255,184,0,0.1);color:var(--warn)}
+.score-bad{background:rgba(255,59,92,0.12);color:var(--danger)}
+.status-dot{width:8px;height:8px;border-radius:50%}
+.dot-green{background:var(--accent2)}.dot-red{background:var(--danger)}.dot-warn{background:var(--warn)}
+.sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;backdrop-filter:blur(4px);animation:fadeIn 0.2s ease}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.sheet{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-radius:24px 24px 0 0;border-top:1px solid var(--border);padding:0 0 32px;z-index:201;animation:slideUp 0.3s cubic-bezier(0.32,0.72,0,1);max-height:90vh;overflow-y:auto}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.sheet-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:12px auto 20px}
+.sheet-icon{font-size:48px;text-align:center;margin-bottom:8px}
+.sheet-name{font-size:22px;font-weight:700;text-align:center;margin-bottom:4px}
+.sheet-type{font-size:13px;color:var(--muted);text-align:center;margin-bottom:20px}
+.sheet-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px;margin-bottom:16px}
+.sheet-stat{background:rgba(0,0,0,0.2);border-radius:var(--radius-sm);padding:12px;text-align:center;border:1px solid var(--border)}
+.sheet-stat-val{font-size:20px;font-weight:700;margin-bottom:3px}
+.sheet-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px}
+.sheet-actions{display:flex;flex-direction:column;gap:10px;padding:0 16px;margin-top:16px}
+.action-btn{width:100%;padding:16px;border-radius:var(--radius-sm);border:none;font-size:16px;font-weight:600;cursor:pointer;transition:all 0.15s}
+.action-btn:active{transform:scale(0.98)}
+.btn-quarantine{background:var(--danger);color:#fff}
+.btn-restore{background:var(--accent2);color:#fff}
+.btn-cancel{background:rgba(255,255,255,0.05);color:var(--text);border:1px solid var(--border)}
+.sheet-info-row{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);font-size:14px}
+.sheet-info-label{color:var(--muted)}
+.sheet-info-val{font-weight:600;font-family:monospace;font-size:13px}
+.alert-list{display:flex;flex-direction:column;gap:8px}
+.alert-card{background:var(--surface);border-radius:var(--radius-sm);padding:12px 14px;box-shadow:var(--shadow);border-left:3px solid;border-top:1px solid var(--border);border-right:1px solid var(--border);border-bottom:1px solid var(--border);animation:slideIn 0.3s ease}
+@keyframes slideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+.alert-quar{border-left-color:var(--danger)}
+.alert-atk{border-left-color:var(--danger)}
+.alert-rate{border-left-color:var(--warn)}
+.alert-info{border-left-color:var(--accent)}
+.alert-time{font-size:11px;color:var(--muted);margin-bottom:3px}
+.alert-msg{font-size:13px;line-height:1.4}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:rgba(13,21,32,0.95);border-top:1px solid var(--border);display:flex;padding:8px 0;padding-bottom:max(8px,env(safe-area-inset-bottom));z-index:100;box-shadow:0 -4px 16px rgba(0,0,0,0.3);backdrop-filter:blur(12px)}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px;cursor:pointer;transition:all 0.15s;background:none;border:none;-webkit-appearance:none;position:relative}
+.nav-item:active{transform:scale(0.92)}
+.nav-icon{font-size:20px;line-height:1}
+.nav-label{font-size:10px;font-weight:600;letter-spacing:0.3px;color:var(--muted)}
+.nav-item.active .nav-label{color:var(--accent)}
+.nav-dot{position:absolute;top:2px;right:18px;width:8px;height:8px;background:var(--danger);border-radius:50%;border:2px solid var(--surface)}
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;gap:12px;color:var(--muted);font-size:14px}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:32px 16px;color:var(--muted);font-size:14px}
+.empty-icon{font-size:40px;margin-bottom:10px}
+.content::-webkit-scrollbar,.sheet::-webkit-scrollbar{display:none}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
+.chart-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
+.chart-val{font-size:22px;font-weight:800;color:var(--accent)}
+.network-map{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:14px;overflow:hidden}
+.zone-card{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:var(--shadow)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useCallback,useMemo}=React;
+const API='';
+
+// ── Helpers ───────────────────────────────────────────────────
+function calcScore(d){
+  let s=100; s-=20;
+  if(!d.vendor||d.vendor.includes('Unknown')||d.vendor.includes('locally'))s-=10;
+  if(d.scanning)s-=50; if(d.under_attack)s-=40;
+  if(d.connections>10)s-=20; else if(d.connections>5)s-=10;
+  if(d.east_west)s-=50; if(d.quarantined_before)s-=10;
+  if(d.quarantined)s-=30; if(d.rl_penalty>0)s-=d.rl_penalty;
+  return Math.max(0,s);
+}
+function scoreColor(s){return s>=60?'var(--accent2)':s>=40?'var(--warn)':'var(--danger)'}
+function scoreClass(s){return s>=60?'score-good':s>=40?'score-warn':'score-bad'}
+function parseAlertType(r){
+  if(r.includes('QUARANTINED'))return'quar';
+  if(r.includes('ATTACKER')||r.includes('SCANNING'))return'atk';
+  if(r.includes('SCORE_DROP')||r.includes('RATE'))return'rate';
+  return'info';
+}
+// ── cleanMsg: strips timestamp, JSON blobs, pipes, emoji — capped at 300 chars ──
+function cleanMsg(r){
+  return r.replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*/,'')
+    .replace(/\{.*?\}/g,'').replace(/\|+/g,'|')
+    .replace(/[🔒📉🚨ℹ️⚠️]/g,'').trim().slice(0,300);
+}
+function authFetch(url,opts={}){
+  const token=window._zt_token||sessionStorage.getItem('zt_token')||'';
+  const headers={...(opts.headers||{})};
+  if(token)headers['Authorization']=`Bearer ${token}`;
+  return fetch(url,{...opts,headers});
+}
+const FRIENDLY={
+  cam1:'Front Door Camera',lock1:'Smart Door Lock',nas:'Home Storage',
+  badge:'Badge Reader',plug1:'Smart Plug',chromecast:'Chromecast',bulb1:'Smart Bulb',
+  envsensor:'Env Sensor',nvr:'Security Recorder',thermo1:'Thermostat',tv1:'Smart TV',
+  sensorhub:'Sensor Hub',lighting:'Lighting Controller',energymeter:'Energy Monitor',printer:'Home Printer'
+};
+const ICONS={
+  cam1:'📷',lock1:'🔒',nas:'💾',badge:'🪪',plug1:'🔌',chromecast:'📺',
+  bulb1:'💡',envsensor:'🌿',nvr:'🎥',thermo1:'🌡️',tv1:'📺',sensorhub:'🔗',
+  lighting:'💡',energymeter:'⚡',printer:'🖨️'
+};
+const TYPE_ICONS={'Network Printer':'🖨️','IP Camera / NVR':'📷','MQTT Sensor/Actuator':'📡','HTTP Device':'📱'};
+function enrich(d){
+  return{...d,
+    friendly_name:FRIENDLY[d.name]||d.name,
+    icon:ICONS[d.name]||TYPE_ICONS[d.type]||'📱',
+    manufacturer:d.vendor?.includes('locally')?'Virtual':d.vendor||'Unknown',
+  };
+}
+
+// ── SVG Sparkline ─────────────────────────────────────────────
+function Sparkline({data,width=80,height=28,color}){
+  if(!data||data.length<2)return<span style={{fontSize:11,color:'var(--muted)'}}>—</span>;
+  const vals=data.map(p=>p.score||p);
+  const mn=Math.min(...vals),mx=Math.max(...vals);
+  const range=mx-mn||1;
+  const pts=vals.map((v,i)=>{
+    const x=(i/(vals.length-1))*width;
+    const y=height-((v-mn)/range)*(height-4)-2;
+    return`${x},${y}`;
+  }).join(' ');
+  return(
+    <svg width={width} height={height} style={{overflow:'visible'}}>
+      <polyline points={pts} fill="none" stroke={color||'var(--accent)'} strokeWidth="2" strokeLinejoin="round"/>
+      <circle cx={parseFloat(pts.split(' ').pop().split(',')[0])}
+              cy={parseFloat(pts.split(' ').pop().split(',')[1])}
+              r="3" fill={color||'var(--accent)'}/>
+    </svg>
+  );
+}
+
+// ── Bar Chart (SVG) ───────────────────────────────────────────
+function BarChart({data,height=80,color}){
+  if(!data||!data.length)return<div className="empty" style={{padding:16}}>No data</div>;
+  const max=Math.max(...data.map(d=>d.value),1);
+  const barW=Math.max(6,Math.floor((300-data.length*2)/data.length));
+  return(
+    <svg width="100%" height={height+24} viewBox={`0 0 ${Math.max(300,data.length*(barW+3))} ${height+24}`} preserveAspectRatio="none">
+      {data.map((d,i)=>{
+        const h=Math.max(2,(d.value/max)*(height-4));
+        const x=i*(barW+3);
+        return(
+          <g key={i}>
+            <rect x={x} y={height-h} width={barW} height={h}
+              fill={d.color||color||'var(--accent)'} rx="2" opacity="0.85"/>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Line Chart (SVG) ──────────────────────────────────────────
+function LineChart({points,height=80,color,fill}){
+  if(!points||points.length<2)return<div className="empty" style={{padding:8}}>No data yet</div>;
+  const vals=points.map(p=>p.y);
+  const mn=Math.min(...vals),mx=Math.max(...vals);
+  const range=mx-mn||1;
+  const W=300,H=height;
+  const coords=points.map((p,i)=>{
+    const x=(i/(points.length-1))*(W-4)+2;
+    const y=H-((p.y-mn)/range)*(H-8)-4;
+    return[x,y];
+  });
+  const pathD='M'+coords.map(c=>c.join(',')).join(' L');
+  const areaD=pathD+` L${coords[coords.length-1][0]},${H} L${coords[0][0]},${H} Z`;
+  return(
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      {fill&&<path d={areaD} fill={color||'var(--accent)'} opacity="0.1"/>}
+      <path d={pathD} fill="none" stroke={color||'var(--accent)'} strokeWidth="2"/>
+      {coords.map((c,i)=>(
+        <circle key={i} cx={c[0]} cy={c[1]} r="3" fill={color||'var(--accent)'}/>
+      ))}
+    </svg>
+  );
+}
+
+// ── Donut Chart ───────────────────────────────────────────────
+function DonutChart({segments,size=100}){
+  const total=segments.reduce((a,s)=>a+s.value,0)||1;
+  let angle=-90;
+  const R=36,cx=50,cy=50;
+  const paths=segments.map(s=>{
+    const pct=s.value/total;
+    const a=pct*360;
+    const start=angle;
+    angle+=a;
+    const r=start*(Math.PI/180),r2=angle*(Math.PI/180);
+    const x1=cx+R*Math.cos(r),y1=cy+R*Math.sin(r);
+    const x2=cx+R*Math.cos(r2),y2=cy+R*Math.sin(r2);
+    const large=a>180?1:0;
+    return{...s,d:`M${cx},${cy} L${x1},${y1} A${R},${R} 0 ${large},1 ${x2},${y2} Z`};
+  });
+  return(
+    <svg width={size} height={size} viewBox="0 0 100 100">
+      {paths.map((p,i)=><path key={i} d={p.d} fill={p.color} opacity="0.85"/>)}
+      <circle cx={50} cy={50} r={20} fill="var(--surface)"/>
+    </svg>
+  );
+}
+
+// ── Network Map (SVG) — horizontal tree layout ────────────────
+// YOUR custom layout — kept intact, NOT replaced with radial version
+function NetworkMap({devices}){
+  const iot=devices.filter(d=>!d.quarantined&&d.lan==='iot-lan');
+  const trusted=devices.filter(d=>d.lan==='c-devices');
+  const quar=devices.filter(d=>d.quarantined);
+
+  const COLS=5,DSX=68,DSY=50,PAD=22;
+  const GW_X=38,LAN_X=130,HUB_W=112,HUB_H=38;
+  const HUB_CX=LAN_X+HUB_W/2;
+  const DEV_X=HUB_CX+HUB_W/2+28;
+  const SPINE_X=DEV_X-20;
+
+  const rowsOf=n=>Math.max(1,Math.ceil(n/COLS));
+  const blockH=n=>rowsOf(n)*DSY;
+
+  const iotH=blockH(iot.length);
+  const quarH=blockH(Math.max(quar.length,1));
+  const trustedH=blockH(Math.max(trusted.length,1));
+
+  const iotY=PAD+iotH/2;
+  const quarY=iotY+iotH/2+PAD+quarH/2;
+  const trustedY=quarY+quarH/2+PAD+trustedH/2;
+  const SVG_H=Math.max(260,trustedY+trustedH/2+PAD);
+  const GW_Y=SVG_H/2;
+
+  const lans=[
+    {label:'IoT LAN',  subnet:'192.168.20.0/24',devs:iot,    color:'var(--accent)', bg:'rgba(0,212,255,0.08)',icon:'📶',y:iotY},
+    {label:'Isolated', subnet:'192.168.30.0/24',devs:quar,   color:'var(--danger)', bg:'rgba(255,59,92,0.08)',icon:'🔒',y:quarY},
+    {label:'Trusted',  subnet:'192.168.10.0/24',devs:trusted,color:'var(--accent2)',bg:'rgba(0,255,136,0.08)',icon:'💻',y:trustedY},
+  ];
+
+  return(
+    <svg width="100%" height={SVG_H} viewBox={`0 0 760 ${SVG_H}`} style={{overflow:'visible'}}>
+      <circle cx={GW_X} cy={GW_Y} r={22} fill="rgba(0,212,255,0.12)" stroke="var(--accent)" strokeWidth="2"/>
+      <text x={GW_X} y={GW_Y+1} textAnchor="middle" dominantBaseline="middle" fontSize="16">🛡</text>
+      <text x={GW_X} y={GW_Y+33} textAnchor="middle" fontSize="8" fill="var(--accent)" fontWeight="bold">Gateway</text>
+
+      {lans.map((lan,li)=>{
+        const lanY=lan.y;
+        const numRows=Math.ceil(Math.max(lan.devs.length,1)/COLS);
+        const startRowY=lanY-(numRows-1)*DSY/2;
+        const endRowY=startRowY+(numRows-1)*DSY;
+        return(
+          <g key={li}>
+            <path d={`M${GW_X+22},${GW_Y} C${LAN_X-20},${GW_Y} ${LAN_X-20},${lanY} ${LAN_X},${lanY}`}
+              fill="none" stroke={lan.color} strokeWidth="1.5" strokeOpacity="0.3"
+              strokeDasharray={lan.devs.length===0?"5,3":"0"}/>
+            <rect x={LAN_X} y={lanY-HUB_H/2} width={HUB_W} height={HUB_H} rx={8}
+              fill={lan.bg} stroke={lan.color} strokeWidth="1.5" strokeOpacity="0.55"/>
+            <text x={LAN_X+12} y={lanY+5} fontSize="14" dominantBaseline="middle">{lan.icon}</text>
+            <text x={LAN_X+30} y={lanY-6} fontSize="9" fill={lan.color} fontWeight="bold">{lan.label}</text>
+            <text x={LAN_X+30} y={lanY+6} fontSize="7" fill="var(--textdim)">{lan.subnet}</text>
+            <text x={LAN_X+HUB_W-6} y={lanY+4} textAnchor="end" fontSize="10" fill={lan.color} fontWeight="bold">{lan.devs.length}</text>
+            {lan.devs.length>0&&(
+              <g>
+                <line x1={LAN_X+HUB_W} y1={lanY} x2={SPINE_X} y2={lanY}
+                  stroke={lan.color} strokeWidth="1" strokeOpacity="0.22"/>
+                {numRows>1&&(
+                  <line x1={SPINE_X} y1={startRowY} x2={SPINE_X} y2={endRowY}
+                    stroke={lan.color} strokeWidth="1" strokeOpacity="0.2"/>
+                )}
+                {Array.from({length:numRows}).map((_,ri)=>{
+                  const ry=startRowY+ri*DSY;
+                  const rowDevs=lan.devs.slice(ri*COLS,(ri+1)*COLS);
+                  return(
+                    <g key={ri}>
+                      <line x1={SPINE_X} y1={ry} x2={DEV_X-14} y2={ry}
+                        stroke={lan.color} strokeWidth="1" strokeOpacity="0.2"/>
+                      {rowDevs.map((d,ci)=>{
+                        const dx=DEV_X+ci*DSX;
+                        const s=calcScore(d);
+                        const dc=d.quarantined?'var(--danger)':scoreColor(s);
+                        return(
+                          <g key={ci}>
+                            {ci>0&&(
+                              <line x1={DEV_X+(ci-1)*DSX+14} y1={ry} x2={dx-14} y2={ry}
+                                stroke={lan.color} strokeWidth="1" strokeOpacity="0.15"/>
+                            )}
+                            <circle cx={dx} cy={ry} r={14} fill={`${dc}22`} stroke={dc} strokeWidth="1.5"/>
+                            <text x={dx} y={ry+1} textAnchor="middle" dominantBaseline="middle" fontSize="11">{d.icon||'📱'}</text>
+                            <text x={dx} y={ry+22} textAnchor="middle" fontSize="7" fill="var(--textdim)">{(d.friendly_name||d.name).slice(0,9)}</text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                })}
+              </g>
+            )}
+            {lan.devs.length===0&&(
+              <text x={LAN_X+HUB_W+18} y={lanY+4} fontSize="8" fill="var(--textdim)" opacity="0.45">— none —</text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Login ─────────────────────────────────────────────────────
+function LoginScreen({onLogin}){
+  const[user,setUser]=useState('admin');
+  const[pass,setPass]=useState('');
+  const[err,setErr]=useState('');
+  const[busy,setBusy]=useState(false);
+  const handleLogin=async()=>{
+    if(!pass){setErr('Enter password');return}
+    setBusy(true);setErr('');
+    try{
+      const r=await fetch(`${API}/auth/login`,{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({username:user,password:pass})});
+      if(r.ok){
+        const data=await r.json();
+        if(data.token){window._zt_token=data.token;sessionStorage.setItem('zt_token',data.token)}
+        onLogin();
+      }else{const d=await r.json();setErr(d.detail||'Invalid credentials')}
+    }catch(e){setErr('Connection failed')}
+    finally{setBusy(false)}
+  };
+  return(
+    <div className="login-screen">
+      <div className="login-logo">🛡</div>
+      <div className="login-title">ZeroTrust</div>
+      <div className="login-sub">Home Security Gateway</div>
+      <div className="login-form">
+        <input className="login-input" type="text" placeholder="Username"
+          value={user} onChange={e=>setUser(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()}/>
+        <input className="login-input" type="password" placeholder="Password"
+          value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()} autoFocus/>
+        {err&&<div className="login-error">{err}</div>}
+        <button className="login-btn" onClick={handleLogin} disabled={busy}>
+          {busy?'Signing in...':'Sign In'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Device Sheet ──────────────────────────────────────────────
+function DeviceSheet({device,onClose,onAction,loading}){
+  if(!device)return null;
+  const score=calcScore(device);
+  const isQuar=device.quarantined;
+  const hist=device.score_history||[];
+  return(
+    <>
+      <div className="sheet-overlay" onClick={onClose}/>
+      <div className="sheet">
+        <div className="sheet-handle"/>
+        <div className="sheet-icon">{device.icon||'📱'}</div>
+        <div className="sheet-name">{device.friendly_name||device.name}</div>
+        <div className="sheet-type">{device.type} · {device.ip}</div>
+        <div className="sheet-grid">
+          <div className="sheet-stat">
+            <div className="sheet-stat-val" style={{color:scoreColor(score)}}>{score}</div>
+            <div className="sheet-stat-label">Trust Score</div>
+          </div>
+          <div className="sheet-stat">
+            <div className="sheet-stat-val">{device.violations||0}</div>
+            <div className="sheet-stat-label">Violations</div>
+          </div>
+          <div className="sheet-stat">
+            <div className="sheet-stat-val">{device.connections||0}</div>
+            <div className="sheet-stat-label">Connections</div>
+          </div>
+          <div className="sheet-stat">
+            <div className="sheet-stat-val">{device.score_avg||score}</div>
+            <div className="sheet-stat-label">Avg Score</div>
+          </div>
+        </div>
+        {hist.length>=2&&(
+          <div style={{padding:'0 16px 12px'}}>
+            <div style={{fontSize:11,color:'var(--muted)',marginBottom:6,textTransform:'uppercase',letterSpacing:'0.5px'}}>Score History</div>
+            <div style={{background:'rgba(0,0,0,0.2)',borderRadius:8,padding:'10px 12px',border:'1px solid var(--border)'}}>
+              <Sparkline data={hist} width={280} height={40} color={scoreColor(score)}/>
+            </div>
+          </div>
+        )}
+        {/* Info rows — no inline Reason row; deductions shown as badges below */}
+        {[['MAC Address',device.mac],['Manufacturer',device.manufacturer||'Unknown'],
+          ['Network Zone',device.lan],['Open Ports',(device.ports||[]).join(', ')||'—'],
+          ['Status',isQuar?'🔒 Isolated':'✅ Active'],
+          ['Rate Penalty',device.rl_penalty>0?`-${device.rl_penalty} pts`:'None'],
+        ].map(([label,val])=>(
+          <div className="sheet-info-row" key={label}>
+            <span className="sheet-info-label">{label}</span>
+            <span className="sheet-info-val">{val}</span>
+          </div>
+        ))}
+        {/* Score Deductions — badge pills, shown for ALL devices with deductions */}
+        {(device.score_reasons||[]).length>0&&(
+          <div style={{padding:'12px 16px',borderBottom:'1px solid var(--border)'}}>
+            <div style={{fontSize:12,color:'var(--muted)',marginBottom:6,textTransform:'uppercase',letterSpacing:'0.5px'}}>
+              Score Deductions
+            </div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+              {(device.score_reasons||[]).map((r,i)=>{
+                const isSevere=r.includes('50')||r.includes('40')||r.includes('35')||r.includes('30');
+                return(
+                  <span key={i} style={{
+                    padding:'3px 8px',borderRadius:6,fontSize:11,fontWeight:600,
+                    background:isSevere?'rgba(255,59,92,0.12)':'rgba(255,184,0,0.1)',
+                    color:isSevere?'var(--danger)':'var(--warn)',
+                    border:'1px solid',
+                    borderColor:isSevere?'rgba(255,59,92,0.3)':'rgba(255,184,0,0.3)',
+                  }}>
+                    {r}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        <div className="sheet-actions">
+          {/* YOUR guard: hide Isolate for c-devices (trusted zone) */}
+          {device.lan!=='c-devices'&&!isQuar&&(
+            <button className="action-btn btn-quarantine" disabled={loading===device.name}
+                onClick={()=>onAction('quarantine',device.name)}>
+                {loading===device.name?'Isolating...':'🔒 Isolate Device'}
+              </button>
+          )}
+          {isQuar&&(
+            <button className="action-btn btn-restore" disabled={loading===device.name}
+                onClick={()=>onAction('restore',device.name)}>
+                {loading===device.name?'Restoring...':'✅ Restore Device'}
+              </button>
+          )}
+          <button className="action-btn btn-cancel" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Devices Tab ───────────────────────────────────────────────
+// YOUR version — three sections: IoT / Isolated / C-Devices
+function DevicesTab({devices,onSelect}){
+  const iot=devices.filter(d=>!d.quarantined&&d.lan==='iot-lan');
+  const trusted=devices.filter(d=>d.lan==='c-devices');
+  const quar=devices.filter(d=>d.quarantined);
+  const Row=({d})=>{
+    const score=calcScore(d);
+    const isQuar=d.quarantined;
+    const isWarn=score<60&&!isQuar;
+    const hist=d.score_history||[];
+    return(
+      <div className={`device-row${isQuar?' quarantined':isWarn?' at-risk':''}`} onClick={()=>onSelect(d)}>
+        <div className={`device-icon-wrap ${isQuar?'icon-quarantine':isWarn?'icon-warn':'icon-normal'}`}>
+          {d.icon||'📱'}
+        </div>
+        <div className="device-info">
+          <div className="device-name">{d.friendly_name||d.name}</div>
+          <div className="device-meta">{d.type} · {d.ip}</div>
+        </div>
+        <div className="device-right">
+          {hist.length>=2
+            ?<Sparkline data={hist} width={48} height={20} color={scoreColor(score)}/>
+            :null}
+          <span className={`score-badge ${scoreClass(score)}`}>{score}</span>
+          <div className={`status-dot ${isQuar?'dot-red':isWarn?'dot-warn':'dot-green'}`}/>
+        </div>
+      </div>
+    );
+  };
+  return(
+    <div>
+      {iot.length>0&&(
+        <div>
+          <div className="section-header">
+            <span className="lan-zone zone-iot">📶 IoT Network</span>
+            <span className="section-count">{iot.length}</span>
+          </div>
+          <div className="device-list">{iot.map(d=><Row key={d.name} d={d}/>)}</div>
+        </div>
+      )}
+      {quar.length>0&&(
+        <div>
+          <div className="section-header">
+            <span className="lan-zone zone-quar">🔒 Isolated Zone</span>
+            <span className="section-count">{quar.length}</span>
+          </div>
+          <div className="device-list">{quar.map(d=><Row key={d.name} d={d}/>)}</div>
+        </div>
+      )}
+      {trusted.length>0&&(
+        <div>
+          <div className="section-header">
+            <span className="lan-zone" style={{background:'rgba(0,255,136,0.1)',color:'var(--accent2)',border:'1px solid rgba(0,255,136,0.2)'}}>💻 C-Devices</span>
+            <span className="section-count">{trusted.length}</span>
+          </div>
+          <div className="device-list">{trusted.map(d=><Row key={d.name} d={d}/>)}</div>
+        </div>
+      )}
+      {!devices.length&&<div className="empty"><div className="empty-icon">📡</div>Scanning...</div>}
+    </div>
+  );
+}
+
+// ── Charts Tab ────────────────────────────────────────────────
+function ChartsTab({devices,alerts}){
+  const scores=devices.map(d=>({name:d.friendly_name||d.name,score:calcScore(d),icon:d.icon||'📱'}))
+    .sort((a,b)=>a.score-b.score);
+  const dist=[
+    {label:'Trusted (≥60)',value:devices.filter(d=>!d.quarantined&&calcScore(d)>=60).length,color:'var(--accent2)'},
+    {label:'At Risk (40-59)',value:devices.filter(d=>!d.quarantined&&calcScore(d)<60&&calcScore(d)>=40).length,color:'var(--warn)'},
+    {label:'Isolated',value:devices.filter(d=>d.quarantined).length,color:'var(--danger)'},
+  ];
+  const total=devices.length||1;
+  const alertByDate={};
+  alerts.forEach(a=>{
+    const date=(a.timestamp||'').slice(0,10);
+    if(date)alertByDate[date]=(alertByDate[date]||0)+1;
+  });
+  const alertPts=Object.entries(alertByDate).slice(-7).map(([d,v])=>({x:d,y:v}));
+  const avgHistory=[];
+  const maxLen=Math.max(...devices.map(d=>(d.score_history||[]).length),0);
+  if(maxLen>1){
+    for(let i=0;i<Math.min(maxLen,20);i++){
+      const vals=devices.map(d=>(d.score_history||[])[i]?.score).filter(v=>v!=null);
+      if(vals.length)avgHistory.push({x:i,y:Math.round(vals.reduce((a,b)=>a+b,0)/vals.length)});
+    }
+  }
+  return(
+    <div>
+      <div className="chart-card">
+        <div className="chart-title">
+          <span>Trust Distribution</span>
+          <span className="chart-val">{devices.length} devices</span>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:20}}>
+          <DonutChart segments={dist.filter(d=>d.value>0)} size={90}/>
+          <div style={{flex:1}}>
+            {dist.map(d=>(
+              <div key={d.label} style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                <div style={{width:10,height:10,borderRadius:2,background:d.color,flexShrink:0}}/>
+                <span style={{fontSize:12,flex:1,color:'var(--textdim)'}}>{d.label}</span>
+                <span style={{fontSize:14,fontWeight:700,color:d.color}}>{d.value}</span>
+                <span style={{fontSize:11,color:'var(--muted)'}}>{Math.round(d.value/total*100)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="chart-card">
+        <div className="chart-title"><span>Device Trust Scores</span></div>
+        <div style={{overflowX:'auto',paddingBottom:4}}>
+          <div style={{minWidth:Math.max(300,scores.length*32)}}>
+            <BarChart height={70} data={scores.map(d=>({value:d.score,color:scoreColor(d.score),label:d.name}))}/>
+            <div style={{display:'flex',gap:2,paddingTop:4}}>
+              {scores.map(d=>(
+                <div key={d.name} style={{flex:1,textAlign:'center',fontSize:9,color:'var(--muted)',overflow:'hidden'}}>
+                  {d.icon}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {avgHistory.length>=2&&(
+        <div className="chart-card">
+          <div className="chart-title">
+            <span>Avg Trust Trend</span>
+            <span style={{fontSize:13,color:'var(--accent2)',fontWeight:700}}>
+              {avgHistory[avgHistory.length-1]?.y}
+            </span>
+          </div>
+          <LineChart points={avgHistory} height={60} color="var(--accent)" fill={true}/>
+        </div>
+      )}
+
+      {alertPts.length>0&&(
+        <div className="chart-card">
+          <div className="chart-title">
+            <span>Alert Activity</span>
+            <span style={{fontSize:13,color:'var(--warn)',fontWeight:700}}>{alerts.length} total</span>
+          </div>
+          <LineChart points={alertPts} height={60} color="var(--warn)" fill={true}/>
+          <div style={{display:'flex',justifyContent:'space-between',marginTop:6,fontSize:10,color:'var(--muted)'}}>
+            {alertPts.map(p=><span key={p.x}>{p.x.slice(5)}</span>)}
+          </div>
+        </div>
+      )}
+
+      {/* Rate Violation History */}
+      <div className="chart-card">
+        <div className="chart-title">
+          <span>Rate Violation History</span>
+          <span style={{fontSize:10,color:'var(--muted)'}}>from alert log</span>
+        </div>
+        <div style={{fontSize:11,color:'var(--muted)',marginBottom:8}}>
+          Each entry = NEW connections/min exceeded threshold. Different from active TCP connections.
+        </div>
+        {alerts.filter(a=>(a.raw||'').includes('RATE')).slice(0,8).length===0
+          ?<div className="empty" style={{padding:'8px 0'}}>
+              <div style={{fontSize:20,marginBottom:4}}>✅</div>No rate violations in log
+            </div>
+          :<div>
+            {alerts.filter(a=>(a.raw||'').includes('RATE')).slice(0,8).map((a,i)=>{
+              const isHard=(a.raw||'').includes('HARD')||(a.raw||'').includes('EXCEEDED');
+              const msg=cleanMsg(a.raw||a.message||'');
+              return(
+                <div key={i} style={{padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
+                    <span style={{fontSize:12,fontWeight:600,color:isHard?'var(--danger)':'var(--warn)'}}>
+                      {isHard?'🚨 HARD VIOLATION':'⚠️  SOFT WARNING'}
+                    </span>
+                    <span style={{fontSize:10,color:'var(--muted)'}}>{a.timestamp}</span>
+                  </div>
+                  <div style={{fontSize:11,color:'var(--textdim)'}}>{msg}</div>
+                </div>
+              );
+            })}
+          </div>
+        }
+      </div>
+
+      {/* Rate Limit Status */}
+      <div className="chart-card">
+        <div className="chart-title">
+          <span>Rate Limit Status</span>
+          <span style={{fontSize:10,color:'var(--muted)'}}>NEW conns/min</span>
+        </div>
+        <div style={{fontSize:11,color:'var(--muted)',marginBottom:8,padding:'4px 0',borderBottom:'1px solid var(--border)'}}>
+          Rate = NEW TCP connection attempts per minute (not bytes/packets)
+        </div>
+        {devices.filter(d=>d.rl_penalty>0).length===0
+          ?<div className="empty" style={{padding:'8px 0'}}>
+              <div style={{fontSize:24,marginBottom:4}}>✅</div>
+              No active rate violations
+            </div>
+          :<div>
+            {devices.filter(d=>d.rl_penalty>0).map(d=>(
+              <div key={d.name} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
+                <span style={{fontSize:18}}>{d.icon}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:600}}>{d.friendly_name||d.name}</div>
+                  <div style={{fontSize:10,color:'var(--muted)'}}>
+                    {d.rl_penalty===10?'SOFT — burst above base rate (auto-recovers)':'HARD — flood above ceiling (admin reset required)'}
+                  </div>
+                </div>
+                <span style={{fontSize:13,fontWeight:700,color:d.rl_penalty===10?'var(--warn)':'var(--danger)'}}>
+                  {d.rl_penalty===10?'⚠️ SOFT':'🚨 HARD'} -{d.rl_penalty}pts
+                </span>
+              </div>
+            ))}
+          </div>
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── Alerts Tab ────────────────────────────────────────────────
+function AlertsTab({alerts}){
+  if(!alerts.length)return(
+    <div className="empty">
+      <div className="empty-icon">✅</div>No alerts — network is clean
+    </div>
+  );
+  return(
+    <div className="alert-list">
+      {alerts.slice(0,60).map((a,i)=>{
+        const type=parseAlertType(a.raw||'');
+        const msg=cleanMsg(a.raw||a.message||'');
+        return(
+          <div key={i} className={`alert-card alert-${type}`}>
+            <div className="alert-time">{a.timestamp}</div>
+            <div className="alert-msg">{msg}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Network Tab ───────────────────────────────────────────────
+// YOUR expandable zone cards + onSelect — kept intact
+// File 6 additions: broader IoT filter (lan!=='c-devices') + dynamic subnets from device IPs
+function NetworkTab({devices,onSelect}){
+  const[expanded,setExpanded]=useState(null);
+
+  // Dynamic subnet helper — reads from actual device IPs, falls back to a default
+  const subnet=ip=>ip?ip.split('.').slice(0,3).join('.')+'.0/24':null;
+
+  const lans={
+    'IoT Network':{
+      devices:devices.filter(d=>!d.quarantined&&d.lan!=='c-devices'),
+      color:'var(--accent)',
+      subnet:(()=>{const d=devices.find(x=>!x.quarantined&&x.lan==='iot-lan');return subnet(d?.ip)||'192.168.20.0/24';})(),
+      icon:'📶',
+    },
+    'Isolated Zone':{
+      devices:devices.filter(d=>d.quarantined),
+      color:'var(--danger)',
+      subnet:(()=>{const d=devices.find(x=>x.quarantined);return subnet(d?.ip)||'192.168.30.0/24';})(),
+      icon:'🔒',
+    },
+    'C-Devices':{
+      devices:devices.filter(d=>d.lan==='c-devices'),
+      color:'var(--accent2)',
+      subnet:(()=>{const d=devices.find(x=>x.lan==='c-devices');return subnet(d?.ip)||'192.168.10.0/24';})(),
+      icon:'💻',
+    },
+  };
+
+  return(
+    <div>
+      <div className="chart-card">
+        <div className="chart-title"><span>Network Topology</span></div>
+        <NetworkMap devices={devices}/>
+      </div>
+      {Object.entries(lans).map(([name,{devices:devs,color,subnet:sn,icon}])=>{
+        const scores=devs.map(d=>calcScore(d));
+        const avg=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
+        const isOpen=expanded===name;
+        return(
+          <div key={name} className="zone-card"
+            style={{borderLeft:`4px solid ${color}`,cursor:'pointer',userSelect:'none'}}
+            onClick={()=>setExpanded(isOpen?null:name)}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <div>
+                <div style={{fontSize:15,fontWeight:700}}>{icon} {name}</div>
+                <div style={{fontSize:12,color:'var(--muted)',fontFamily:'monospace'}}>{sn}</div>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{background:`${color}22`,color,borderRadius:8,padding:'4px 12px',fontSize:20,fontWeight:800}}>
+                  {devs.length}
+                </div>
+                <span style={{fontSize:11,color:'var(--muted)',transition:'transform 0.2s',
+                  display:'inline-block',transform:isOpen?'rotate(180deg)':'rotate(0deg)'}}>▼</span>
+              </div>
+            </div>
+            {avg!==null&&(
+              <div>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:4,fontSize:12,color:'var(--muted)'}}>
+                  <span>Average Trust</span>
+                  <span style={{color:scoreColor(avg),fontWeight:700}}>{avg}</span>
+                </div>
+                <div style={{height:5,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
+                  <div style={{height:'100%',width:`${avg}%`,background:scoreColor(avg),borderRadius:3,transition:'width 0.5s'}}/>
+                </div>
+              </div>
+            )}
+            {devs.length===0&&<div style={{color:'var(--muted)',fontSize:12,marginTop:4}}>No devices in this zone</div>}
+            {isOpen&&devs.length>0&&(
+              <div style={{marginTop:12,borderTop:`1px solid ${color}33`,paddingTop:10}}
+                onClick={e=>e.stopPropagation()}>
+                {devs.map(d=>{
+                  const s=calcScore(d);
+                  return(
+                    <div key={d.name}
+                      style={{display:'flex',alignItems:'center',gap:10,padding:'9px 6px',
+                        borderBottom:'1px solid var(--border)',cursor:'pointer',borderRadius:6,
+                        transition:'background 0.12s'}}
+                      onClick={()=>onSelect&&onSelect(d)}
+                      onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.04)'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                      <span style={{fontSize:20,flexShrink:0}}>{d.icon||'📱'}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,fontWeight:600,
+                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                          {d.friendly_name||d.name}
+                        </div>
+                        <div style={{fontSize:11,color:'var(--muted)',fontFamily:'monospace'}}>{d.ip}</div>
+                      </div>
+                      <span style={{fontSize:13,fontWeight:700,color:scoreColor(s),flexShrink:0,
+                        background:`${scoreColor(s)}18`,padding:'2px 8px',borderRadius:6}}>{s}</span>
+                      <span style={{fontSize:11,color:'var(--muted)',flexShrink:0}}>›</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────
+function App(){
+  const[authed,setAuthed]=useState(false);
+  const[checking,setChecking]=useState(true);
+  const[tab,setTab]=useState('devices');
+  const[devices,setDevices]=useState([]);
+  const[alerts,setAlerts]=useState([]);
+  const[loading,setLoading]=useState(null);
+  const[selected,setSelected]=useState(null);
+  const[fetching,setFetching]=useState(true);
+  const[wsOk,setWsOk]=useState(false);
+  // YOUR controller heartbeat state
+  const[ctrlOk,setCtrlOk]=useState(null);
+  const[lastCycle,setLastCycle]=useState('');
+
+  useEffect(()=>{
+    const saved=sessionStorage.getItem('zt_token');
+    if(saved)window._zt_token=saved;
+  },[]);
+
+  useEffect(()=>{
+    authFetch(`${API}/api/devices`)
+      .then(r=>{if(r.ok)setAuthed(true)})
+      .catch(()=>{})
+      .finally(()=>setChecking(false));
+  },[]);
+
+  const fetchAll=useCallback(async()=>{
+    try{
+      const[dr,ar]=await Promise.all([
+        authFetch(`${API}/api/devices`).then(r=>r.ok?r.json():null),
+        authFetch(`${API}/api/alerts?tail=100`).then(r=>r.ok?r.json():null),
+      ]);
+      // YOUR controller heartbeat — marks paused if no cycle in 20s
+      try{
+        const sr=await authFetch(`${API}/api/status`);
+        if(sr.ok){
+          const sd=await sr.json();
+          const lastTs=sd.last_cycle_at;
+          if(lastTs){
+            const diffSec=(Date.now()-new Date(lastTs).getTime())/1000;
+            setCtrlOk(diffSec<20);
+            setLastCycle(lastTs.slice(11,19));
+          }
+        }
+      }catch(e){setCtrlOk(false);}
+      if(dr)setDevices((dr.devices||[]).map(enrich));
+      if(ar)setAlerts(ar.alerts||[]);
+    }catch(e){}
+    finally{setFetching(false)}
+  },[]);
+
+  useEffect(()=>{
+    if(!authed)return;
+    fetchAll();
+    const t=setInterval(fetchAll,8000);
+    return()=>clearInterval(t);
+  },[authed,fetchAll]);
+
+  useEffect(()=>{
+    if(!authed)return;
+    const proto=location.protocol==='https:'?'wss':'ws';
+    const ws=new WebSocket(`${proto}://${location.host}/ws/live`);
+    ws.onopen=()=>setWsOk(true);
+    ws.onclose=()=>setWsOk(false);
+    ws.onmessage=e=>{
+      try{
+        const data=JSON.parse(e.data);
+        if(data.type==='alert'){
+          setAlerts(prev=>[{raw:data.message,timestamp:(data.timestamp||'').slice(0,19).replace('T',' '),message:data.message},...prev].slice(0,100));
+          fetchAll();
+        }
+      }catch{}
+    };
+    return()=>ws.close();
+  },[authed,fetchAll]);
+
+  const handleAction=async(action,name)=>{
+    setLoading(name);
+    try{
+      const r=await authFetch(`${API}/api/${action}/${name}`,{method:'POST'});
+      if(r.ok){setTimeout(fetchAll,1500);setSelected(null)}
+    }catch(e){}
+    finally{setLoading(null)}
+  };
+
+  if(checking)return<div className="loading" style={{height:'100vh'}}><div className="spinner"/></div>;
+  if(!authed)return<LoginScreen onLogin={()=>{setAuthed(true);fetchAll()}}/>;
+
+  const quarCount=devices.filter(d=>d.quarantined).length;
+  const alertToday=alerts.filter(a=>(a.timestamp||'').slice(0,10)===new Date().toISOString().slice(0,10)).length;
+  const atRisk=devices.filter(d=>!d.quarantined&&calcScore(d)<60).length;
+  const trusted=devices.length-quarCount-atRisk;
+
+  return(
+    <div className="app">
+      <header className="header">
+        <div className="header-logo">
+          <div className="header-icon">🛡</div>
+          <div>
+            <div className="header-title">ZeroTrust</div>
+            {/* YOUR smart header sub — shows controller pause, live time, or polling */}
+            <div className="header-sub" style={{color:ctrlOk===false?'var(--danger)':ctrlOk?'var(--accent2)':'var(--muted)'}}>
+              {ctrlOk===false
+                ?'⏸ Controller Paused'
+                :ctrlOk
+                  ?`● Live${lastCycle?' · '+lastCycle:''}`
+                  :wsOk?'● Live':'○ Polling'
+              }
+            </div>
+          </div>
+        </div>
+        <div className={`header-status ${ctrlOk===false?'status-alert':quarCount>0||atRisk>0?'status-alert':'status-secure'}`}>
+          <div className={`pulse ${ctrlOk===false?'pulse-red':quarCount>0||atRisk>0?'pulse-red':'pulse-green'}`}/>
+          {ctrlOk===false
+            ?'⏸ PAUSED'
+            :quarCount>0?`${quarCount} Isolated`
+            :atRisk>0?`${atRisk} At Risk`
+            :'Secure'
+          }
+        </div>
+      </header>
+
+      <div className="content">
+        <div className="stat-row">
+          <div className="stat-card"><div className="stat-val color-blue">{devices.length}</div><div className="stat-label">Total</div></div>
+          <div className="stat-card"><div className="stat-val color-green">{trusted}</div><div className="stat-label">Safe</div></div>
+          <div className="stat-card"><div className="stat-val color-warn">{atRisk}</div><div className="stat-label">Risk</div></div>
+          <div className="stat-card"><div className="stat-val color-danger">{quarCount}</div><div className="stat-label">Isolated</div></div>
+        </div>
+        {fetching
+          ?<div className="loading"><div className="spinner"/>Loading...</div>
+          :tab==='devices'?<DevicesTab devices={devices} onSelect={setSelected}/>
+          :tab==='alerts'?<AlertsTab alerts={alerts}/>
+          :tab==='charts'?<ChartsTab devices={devices} alerts={alerts}/>
+          :<NetworkTab devices={devices} onSelect={setSelected}/>
+        }
+      </div>
+
+      <nav className="bottom-nav">
+        {[{id:'devices',icon:'📱',label:'Devices'},
+          {id:'alerts',icon:'🔔',label:'Alerts',badge:alertToday>0},
+          {id:'charts',icon:'📊',label:'Charts'},
+          {id:'network',icon:'🌐',label:'Network'},
+        ].map(({id,icon,label,badge})=>(
+          <button key={id} className={`nav-item${tab===id?' active':''}`} onClick={()=>setTab(id)} style={{position:'relative'}}>
+            <span className="nav-icon">{icon}</span>
+            <span className="nav-label">{label}</span>
+            {badge&&<div className="nav-dot"/>}
+          </button>
+        ))}
+      </nav>
+
+      {selected&&<DeviceSheet device={selected} onClose={()=>setSelected(null)} onAction={handleAction} loading={loading}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
+
+========== start_dashboard.sh ==========
+#!/bin/bash
+# start_dashboard.sh
+# Starts ZeroTrust dashboard API with HTTPS
+
+CERT="/home/sk/certs/gateway.crt"
+KEY="/home/sk/certs/gateway.key"
+
+echo "Starting ZeroTrust Dashboard (HTTPS)..."
+echo "Access at: https://192.168.35.136:8443"
+echo ""
+
+cd /home/sk
+python3 -m uvicorn dashboard_api:app \
+    --host 0.0.0.0 \
+    --port 8443 \
+    --ssl-certfile "$CERT" \
+    --ssl-keyfile  "$KEY" \
+    --log-level info
+
