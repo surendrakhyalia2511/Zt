@@ -217,12 +217,23 @@ def apply_mark_rules(container, ip, device_type):
     return success
 
 
-# Keep these as aliases so controller calls work unchanged
-def apply_hard_limit(container, ip, device_type):
+def apply_conn_limit(container, ip, device_type):
+    """
+    Install iptables hashlimit MARK rules for TRAFFIC RATE limiting.
+    Called on new device discovery. Controls NEW TCP SYNs per minute.
+    TRAFFIC FLOW only — not connection count.
+    Connection count (max simultaneous sessions) is enforced separately
+    by check_active_connections() via 'ss'. See max_conn in profiles.
+    """
     return apply_mark_rules(container, ip, device_type)
 
 
-def apply_conn_limit(container, ip, device_type):
+def apply_hard_limit(container, ip, device_type):
+    """
+    Re-apply MARK rules after IP change (container restart / IP sync).
+    Called by sync_rate_limit_rules() only — semantically distinct from
+    new-device onboarding. Same underlying rules as apply_conn_limit.
+    """
     return apply_mark_rules(container, ip, device_type)
 
 

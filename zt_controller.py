@@ -148,9 +148,10 @@ def main():
     log("Zero Trust IoT Gateway Controller Started")
     log("=" * 60)
 
-    dh            = load_history()
-    known_devices = {}
-    cycle         = 0
+    dh               = load_history()
+    known_devices    = {}
+    cycle            = 0
+    force_rediscovery = False   # set True after quarantine/restore to trigger immediate rediscovery
 
     if dh:
         rl.apply_all(dh)
@@ -212,6 +213,10 @@ def main():
         ew_containers = set()
 
         for ew_src, ew_dsts in east_west_map.items():
+            # Filter out gateway .1 — normal routing, not lateral movement
+            ew_dsts = {d for d in ew_dsts if not d.endswith('.1')}
+            if not ew_dsts:
+                continue
             ew_container = get_container_name(ew_src)
             if not ew_container or ew_container == ew_src:
                 continue
@@ -238,6 +243,7 @@ def main():
                         dh[ew_container].get("device_type", "Unknown IoT Device"),
                         dh, ew_container
                     )
+                    force_rediscovery = True   # pick up new quarantine-lan IP
 
         # ── Rate limit evaluation ─────────────────────────────
         drop_counts = rl.read_drop_counts()
@@ -285,6 +291,7 @@ def main():
                         d_type,
                         dh, d_key
                     )
+                    force_rediscovery = True   # pick up new quarantine-lan IP
 
             if recovered:
                 log(f"RATE RECOVERED| {d_container:15} | penalty cleared")
@@ -295,7 +302,6 @@ def main():
                     "message": "Rate returned to normal — penalty removed"
                 })
 
-        # rl.reset_counters() — not needed with tcpdump-based counting
 
         # ── Per-device evaluation ─────────────────────────────
         for ip, info in known_devices.items():
@@ -413,6 +419,7 @@ def main():
                         dh[key].get("device_type", "Unknown IoT Device"),
                         dh, key
                     )
+                    force_rediscovery = True   # pick up new quarantine-lan IP
 
         # ── End of cycle ──────────────────────────────────────
         try:
@@ -421,6 +428,7 @@ def main():
         except Exception:
             pass
 
+        rl.reset_counters()
         save_history(dh)
         log(f"Cycle {cycle} complete. {len(known_devices)} devices. History saved.")
         log(f"Sleeping {SLEEP_BETWEEN}s...")

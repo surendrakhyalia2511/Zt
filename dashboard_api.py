@@ -12,7 +12,7 @@ from datetime import datetime
 
 from auth import require_auth, login, logout
 import sys
-sys.path.insert(0, '/home/sk')
+sys.path.insert(0, os.environ.get('SK_HOME', '/home/sk'))
 from env_loader import env
 
 app = FastAPI(title="ZeroTrust Gateway Dashboard API", version="1.0.0")
@@ -20,14 +20,14 @@ app = FastAPI(title="ZeroTrust Gateway Dashboard API", version="1.0.0")
 # ── Middleware first ─────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://192.168.35.136", "https://localhost", "http://localhost"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ── Static files (secure dir — web assets only) ───────────────
-app.mount("/static", StaticFiles(directory="/home/sk/static_web"), name="static")
+app.mount("/static", StaticFiles(directory=env("STATIC_DIR", "/home/sk/static_web")), name="static")
 
 # ── File Paths ───────────────────────────────────────────────
 DEVICE_HISTORY = env("DEVICE_HISTORY", os.path.expanduser("~/device_history.json"))
@@ -58,11 +58,11 @@ async def read_log_lines(path: str, tail: int = 200):
 def derive_lan(ip: str, quarantined: bool) -> str:
     if quarantined:
         return "quarantine-lan"
-    if ip.startswith("192.168.20."):
+    if ip.startswith(env("IOT_NET", "192.168.20") + "."):
         return "iot-lan"
-    if ip.startswith("192.168.30."):
+    if ip.startswith(env("QUARANTINE_NET", "192.168.30") + "."):
         return "quarantine-lan"
-    if ip.startswith("192.168.10."):
+    if ip.startswith(env("TRUSTED_NET", "192.168.10") + "."):
         return "c-devices"
     return "iot-lan"
 
@@ -123,21 +123,21 @@ async def do_logout(request: Request):
 # ── Dashboard (public — serves HTML) ─────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
-    async with aiofiles.open("/home/sk/dashboard.html", "r") as f:
+    async with aiofiles.open(env("DASHBOARD_HTML", "/home/sk/dashboard.html"), "r") as f:
         return await f.read()
 
 # ── PWA routes (public) ───────────────────────────────────────
 @app.get("/manifest.json")
 async def manifest():
     return FileResponse(
-        "/home/sk/static_web/manifest.json",
+        os.path.join(env("STATIC_DIR", "/home/sk/static_web"), "manifest.json"),
         media_type="application/manifest+json"
     )
 
 @app.get("/sw.js")
 async def service_worker():
     return FileResponse(
-        "/home/sk/static_web/sw.js",
+        os.path.join(env("STATIC_DIR", "/home/sk/static_web"), "sw.js"),
         media_type="application/javascript"
     )
 
@@ -196,7 +196,7 @@ async def get_traffic(tail: int = 200, _=Depends(require_auth)):
         ip    = "unknown"
         msg   = parts[2] if len(parts) >= 3 else line
         for segment in msg.split():
-            if segment.startswith("192.168."):
+            if segment.startswith(env("IOT_NET", "192.168.20") + ".") or segment.startswith(env("TRUSTED_NET", "192.168.10") + "."):
                 ip = segment
                 break
         entries.append({

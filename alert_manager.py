@@ -49,24 +49,28 @@ def _write_log(message):
         print(f"Log write failed: {e}")
 
 def _send_telegram(message):
+    """Send Telegram alert in background thread — never blocks the controller."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return False
-    try:
-        url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        data = json.dumps({
-            "chat_id"   : TELEGRAM_CHAT_ID,
-            "text"      : message,
-            "parse_mode": "HTML"
-        }).encode()
-        req = urllib.request.Request(
-            url, data=data,
-            headers={"Content-Type": "application/json"}
-        )
-        urllib.request.urlopen(req, timeout=TELEGRAM_TIMEOUT)
-        return True
-    except Exception as e:
-        _write_log(f"[TELEGRAM ERROR] {e}")
-        return False
+    import threading
+    def _send():
+        try:
+            url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            data = json.dumps({
+                "chat_id"   : TELEGRAM_CHAT_ID,
+                "text"      : message,
+                "parse_mode": "HTML"
+            }).encode()
+            req = urllib.request.Request(
+                url, data=data,
+                headers={"Content-Type": "application/json"}
+            )
+            urllib.request.urlopen(req, timeout=TELEGRAM_TIMEOUT)
+        except Exception as e:
+            _write_log(f"[TELEGRAM ERROR] {e}")
+    t = threading.Thread(target=_send, daemon=True)
+    t.start()
+    return True
 
 def send_alert(alert_type, details):
     icon      = ICONS.get(alert_type, "ℹ️")

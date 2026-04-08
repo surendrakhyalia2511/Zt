@@ -34,7 +34,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 
 # ── Config ─────────────────────────────────────────────────────
-AUTH_CONFIG_FILE = "/home/sk/auth_config.json"
+AUTH_CONFIG_FILE = os.path.join(os.environ.get("SK_HOME", "/home/sk"), "auth_config.json")
 
 def _load_config():
     defaults = {

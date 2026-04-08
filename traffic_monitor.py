@@ -101,7 +101,9 @@ def capture_both(duration):
                 dst_ip = ".".join(parts[i+3].rstrip(":").split(".")[:4])
                 if (src_ip.startswith(IOT_NET) and
                         dst_ip.startswith(IOT_NET) and
-                        src_ip != dst_ip):
+                        src_ip != dst_ip and
+                        not dst_ip.endswith('.1') and
+                        not src_ip.endswith('.1')):
                     east_west_map[src_ip].add(dst_ip)
                 break
 

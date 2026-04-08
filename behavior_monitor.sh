@@ -1,4 +1,8 @@
 #!/bin/bash
+# Source environment variables
+set -a
+[ -f /home/sk/.env ] && source /home/sk/.env
+set +a
 # behavior_monitor.sh
 # Zero Trust IoT Gateway — Continuous Background Behavioral Monitor
 #
@@ -15,9 +19,6 @@
 
 EVENTS_FILE="/var/run/zt-monitor-events.jsonl"
 LOG_FILE="/var/log/zt-behavior.log"
-IOT_NET="192.168.20"
-TRUSTED_NET="192.168.10"
-SCAN_THRESHOLD=3
 CAPTURE_WINDOW=2   # seconds per capture
 
 # ── Ensure events file exists and is writable ────────────────
@@ -105,7 +106,7 @@ while true; do
         if [[ -n "$src" && -n "$dst" ]]; then
             src_ip=$(echo "$src" | cut -d. -f1-4)
             dst_ip=$(echo "$dst" | cut -d. -f1-4)
-            if [[ "$src_ip" == ${IOT_NET}.* && "$dst_ip" == ${IOT_NET}.* && "$src_ip" != "$dst_ip" ]]; then
+            if [[ "$src_ip" == ${IOT_NET}.* && "$dst_ip" == ${IOT_NET}.* && "$src_ip" != "$dst_ip" && "$dst_ip" != "${IOT_NET}.1" && "$src_ip" != "${IOT_NET}.1" ]]; then
                 if [[ -z "${EW_MAP[$src_ip]+x}" ]]; then
                     EW_MAP[$src_ip]="$dst_ip"
                 elif [[ "${EW_MAP[$src_ip]}" != *"$dst_ip"* ]]; then

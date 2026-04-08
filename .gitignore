@@ -23,3 +23,4 @@ myenv/
 *la.py
 device_history.json
 log-*.txt
+auth_config.json

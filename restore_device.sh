@@ -7,10 +7,10 @@ docker network connect iot-lan $CONTAINER
 
 # Reset quarantined flag in device_history.json
 python3 -c "
-import json, sys
+import json, sys, os
 name = '$1'
 try:
-    with open('/home/sk/device_history.json') as f:
+    with open(os.environ.get('DEVICE_HISTORY', '/home/sk/device_history.json')) as f:
         h = json.load(f)
     if name in h:
         h[name]['quarantined']   = False

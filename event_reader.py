@@ -59,7 +59,12 @@ def read_and_clear():
                     if etype == "SCAN":
                         scan_events.append(event)
                     elif etype == "EAST_WEST":
-                        east_west_events.append(event)
+                        # Filter out gateway IP (.1) — normal routing, not lateral movement
+                        dsts = event.get("dst_ips", [])
+                        dsts = [d for d in dsts if not d.endswith(".1")]
+                        if dsts:
+                            event["dst_ips"] = dsts
+                            east_west_events.append(event)
                 except json.JSONDecodeError:
                     pass
 

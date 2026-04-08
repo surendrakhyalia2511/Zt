@@ -104,76 +104,207 @@ networks:
   iot-lan:
     external: true
 
-========== manifest.json ==========
-{
-  "name": "ZeroTrust Gateway",
-  "short_name": "ZeroTrust",
-  "description": "Home IoT Security Dashboard",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#080d14",
-  "theme_color": "#00d4ff",
-  "orientation": "any",
-  "icons": [
+========== docker-containers.txt ==========
+CONTAINER ID   IMAGE               COMMAND                  CREATED       STATUS       PORTS      NAMES
+9ef60339e6ed   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   lighting
+9af693d38d95   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     tv1
+9f23560d3a00   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     lock1
+361fdcde7ce7   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   thermo1
+3fc75e6d58de   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     badge
+f2a87c220ea2   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     nas
+8c3f4602d8e2   olbat/cupsd         "/usr/sbin/cupsd -f"     4 weeks ago   Up 2 hours   631/tcp    printer
+b67d8303b68c   httpd               "httpd-foreground"       4 weeks ago   Up 2 hours   80/tcp     energymeter
+d06f2aff140e   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     nvr
+efd9728dd694   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   bulb1
+c0509a7fdd38   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   envsensor
+8a1e09f77c39   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     sensorhub
+02df9d392e7e   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     chromecast
+e0d7605afdaf   httpd               "httpd-foreground"       4 weeks ago   Up 2 hours   80/tcp     plug1
+bc2fd81f0051   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     cam1
+
+========== docker-networks-list.txt ==========
+NETWORK ID     NAME             DRIVER    SCOPE
+448e5996ff75   bridge           bridge    local
+3d6e8da54af6   host             host      local
+44cb28b6b028   iot-lan          bridge    local
+86b5009ca5f5   none             null      local
+20064fe139d5   quarantine-lan   bridge    local
+
+========== docker-network-iot.json ==========
+[
     {
-      "src": "/static/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/static/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+        "Name": "iot-lan",
+        "Id": "44cb28b6b028d1ac97aeaf7db39834f30af4a1924281c59e4d2ca9ea5497d625",
+        "Created": "2026-02-23T00:11:34.237042458+05:30",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv4": true,
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": {},
+            "Config": [
+                {
+                    "Subnet": "192.168.20.0/24",
+                    "Gateway": "192.168.20.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "02df9d392e7e9ccf0242806cd2f3adf8aaf8c7ba778200c51eed911e2306caef": {
+                "Name": "chromecast",
+                "EndpointID": "c1a8836c00799b41008b41922e7aa13eb5fd454943ca66f24eb6f20c84390aa4",
+                "MacAddress": "ca:c8:60:f5:a3:6d",
+                "IPv4Address": "192.168.20.13/24",
+                "IPv6Address": ""
+            },
+            "361fdcde7ce7ad932ed4d5aed6644e43b06d6e2d7df158af66f0b97a44f39d45": {
+                "Name": "thermo1",
+                "EndpointID": "8997f435c9ef34b4a5ce906d0e7427a7d351f1d3aacbfd76894f9ae21970022a",
+                "MacAddress": "c2:6c:9c:2f:d1:0a",
+                "IPv4Address": "192.168.20.14/24",
+                "IPv6Address": ""
+            },
+            "3fc75e6d58de152ac3df1ebf14a016300e01458c40426c2c2293d7b10dee84f5": {
+                "Name": "badge",
+                "EndpointID": "4fa5447ed1c50918da0d49dac86ef04b7b6af0441336df5212e85111bf670f93",
+                "MacAddress": "a2:48:d9:61:cd:40",
+                "IPv4Address": "192.168.20.5/24",
+                "IPv6Address": ""
+            },
+            "8a1e09f77c392d19db4b2c9e99d730b4b964511139f42f4510dc991650015556": {
+                "Name": "sensorhub",
+                "EndpointID": "825d4b164e18ba0dea3dec3cd0cd7a30b452a095d77833522a0e7ed6405799cb",
+                "MacAddress": "4e:26:64:e1:8d:72",
+                "IPv4Address": "192.168.20.7/24",
+                "IPv6Address": ""
+            },
+            "8c3f4602d8e279a1e24d9427e70594e8e0bb16f7c2bf0166e8113ed5434f3918": {
+                "Name": "printer",
+                "EndpointID": "b46c8efdb152d0e72add84d663efdf4a47b33cce9ae8faf8928752888f4d4940",
+                "MacAddress": "72:ff:cf:60:e6:1d",
+                "IPv4Address": "192.168.20.8/24",
+                "IPv6Address": ""
+            },
+            "9af693d38d95b8a69c0ad048487cc529704e5b3eed473eeba2f51e1670439ae0": {
+                "Name": "tv1",
+                "EndpointID": "adc2ba256edcdb7ffdc0cda1c878202eb551065a79c0463639e3b359ff3fb9de",
+                "MacAddress": "ce:bf:55:7d:69:e8",
+                "IPv4Address": "192.168.20.6/24",
+                "IPv6Address": ""
+            },
+            "9ef60339e6ed31d233e8b3ab1e1d0b3f87771b70df0fd8ef94ee851880819e54": {
+                "Name": "lighting",
+                "EndpointID": "a0da684d0131441a3f5bed86b55245df1f0d949c6d373dfb080dfca27e5fc309",
+                "MacAddress": "9a:3b:5e:30:fb:5c",
+                "IPv4Address": "192.168.20.10/24",
+                "IPv6Address": ""
+            },
+            "9f23560d3a000afafafa07da33ce2208baa66e826344b5091b088c9d14162c6d": {
+                "Name": "lock1",
+                "EndpointID": "d50138adeb2c44003d84bf6edd1f7b635adb4aec8d5c2b6648f066a878f00560",
+                "MacAddress": "de:ef:b9:3b:13:a6",
+                "IPv4Address": "192.168.20.9/24",
+                "IPv6Address": ""
+            },
+            "b67d8303b68c6509cc7a83eccf5309f2d57c6fc794dc13c200b4a140661d8c57": {
+                "Name": "energymeter",
+                "EndpointID": "9f24e149f6a3147aef91a140558533b0c58e05a5393173d882728e0a4e2f2a0a",
+                "MacAddress": "72:1e:30:dd:5a:fa",
+                "IPv4Address": "192.168.20.15/24",
+                "IPv6Address": ""
+            },
+            "bc2fd81f0051aab669d9fe59cfbbb7d34d4c20aa297f8e927fc8cefbed45dcb3": {
+                "Name": "cam1",
+                "EndpointID": "97aaaa875dc7d0511017c1faf12cb74824ab9a9da753b1194be778a43b3b7bd0",
+                "MacAddress": "02:05:2c:02:5d:57",
+                "IPv4Address": "192.168.20.4/24",
+                "IPv6Address": ""
+            },
+            "c0509a7fdd383a7c795ac16308e92418635b61fe52d95da068155df43be69a66": {
+                "Name": "envsensor",
+                "EndpointID": "a4f5dc012c799f124c67ecee57ee369f6be448172f4a4aeb51b5051227357fd7",
+                "MacAddress": "52:97:8f:a3:22:07",
+                "IPv4Address": "192.168.20.11/24",
+                "IPv6Address": ""
+            },
+            "d06f2aff140ececb48198653bd27c1d13580d4ec7da7a93c182778157144098f": {
+                "Name": "nvr",
+                "EndpointID": "a46305352714a3af003ee448b5eeec6e0f0245ca06d532e0ed11f006ea9d1997",
+                "MacAddress": "52:1b:1b:4d:31:a9",
+                "IPv4Address": "192.168.20.2/24",
+                "IPv6Address": ""
+            },
+            "e0d7605afdafe5fd7c360b362bafa0cf69920b58faa14a7613cc2310056787d0": {
+                "Name": "plug1",
+                "EndpointID": "04fdc10f714d430d170b416c6e7e0e36c8764231f783286283a5fd5264c84418",
+                "MacAddress": "62:21:ae:37:d2:f9",
+                "IPv4Address": "192.168.20.12/24",
+                "IPv6Address": ""
+            },
+            "efd9728dd6942b609b46428aa47c4a1dd556267e12ad89b68557e49893562c33": {
+                "Name": "bulb1",
+                "EndpointID": "33cbafc59fc3774651126448bd6c83910b5ad418394ad8ed97cb56ba1f08e25e",
+                "MacAddress": "72:d9:99:6d:8e:61",
+                "IPv4Address": "192.168.20.16/24",
+                "IPv6Address": ""
+            },
+            "f2a87c220ea2f0c242341c5e694e98eb0491e5e87e0a20a8383d03d0c86d3abd": {
+                "Name": "nas",
+                "EndpointID": "ed8e8fcac42d1d515bf6df27fbf78dadfa4f82f281c3717b7a87f7d76bd0dd73",
+                "MacAddress": "56:db:47:35:3c:76",
+                "IPv4Address": "192.168.20.3/24",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {
+            "com.docker.network.bridge.name": "docker-iot"
+        },
+        "Labels": {}
     }
-  ]
-}
+]
 
-========== sw.js ==========
-const CACHE = 'zt-v1';
-const STATIC = [
-  '/',
-  '/static/react.min.js',
-  '/static/react-dom.min.js',
-  '/static/babel.min.js',
-];
-
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(STATIC))
-  );
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))
-    )
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  // API calls — always network, never cache
-  if (url.pathname.startsWith('/api') || url.pathname.startsWith('/ws')) {
-    return;
-  }
-  // Static assets — cache first
-  e.respondWith(
-    caches.match(e.request).then(cached => {
-      return cached || fetch(e.request).then(res => {
-        if (res.ok && e.request.method === 'GET') {
-          const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
-        }
-        return res;
-      });
-    })
-  );
-});
+========== docker-network-quar.json ==========
+[
+    {
+        "Name": "quarantine-lan",
+        "Id": "20064fe139d5815aa59aba084d7f748130bd1ea0045b82e3a46afc9bd2bb45bf",
+        "Created": "2026-02-24T06:48:54.517668069+05:30",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv4": true,
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": {},
+            "Config": [
+                {
+                    "Subnet": "192.168.30.0/24",
+                    "Gateway": "192.168.30.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {},
+        "Options": {
+            "com.docker.network.bridge.name": "docker-quar"
+        },
+        "Labels": {}
+    }
+]
 
 ========== environment.txt ==========
 SHELL=/bin/bash
@@ -4109,208 +4240,6 @@ User=root
 [Install]
 WantedBy=multi-user.target
 
-========== docker-containers.txt ==========
-CONTAINER ID   IMAGE               COMMAND                  CREATED       STATUS       PORTS      NAMES
-9ef60339e6ed   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   lighting
-9af693d38d95   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     tv1
-9f23560d3a00   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     lock1
-361fdcde7ce7   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   thermo1
-3fc75e6d58de   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     badge
-f2a87c220ea2   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     nas
-8c3f4602d8e2   olbat/cupsd         "/usr/sbin/cupsd -f"     4 weeks ago   Up 2 hours   631/tcp    printer
-b67d8303b68c   httpd               "httpd-foreground"       4 weeks ago   Up 2 hours   80/tcp     energymeter
-d06f2aff140e   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     nvr
-efd9728dd694   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   bulb1
-c0509a7fdd38   eclipse-mosquitto   "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   1883/tcp   envsensor
-8a1e09f77c39   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     sensorhub
-02df9d392e7e   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     chromecast
-e0d7605afdaf   httpd               "httpd-foreground"       4 weeks ago   Up 2 hours   80/tcp     plug1
-bc2fd81f0051   nginx               "/docker-entrypoint.…"   4 weeks ago   Up 2 hours   80/tcp     cam1
-
-========== docker-networks-list.txt ==========
-NETWORK ID     NAME             DRIVER    SCOPE
-448e5996ff75   bridge           bridge    local
-3d6e8da54af6   host             host      local
-44cb28b6b028   iot-lan          bridge    local
-86b5009ca5f5   none             null      local
-20064fe139d5   quarantine-lan   bridge    local
-
-========== docker-network-iot.json ==========
-[
-    {
-        "Name": "iot-lan",
-        "Id": "44cb28b6b028d1ac97aeaf7db39834f30af4a1924281c59e4d2ca9ea5497d625",
-        "Created": "2026-02-23T00:11:34.237042458+05:30",
-        "Scope": "local",
-        "Driver": "bridge",
-        "EnableIPv4": true,
-        "EnableIPv6": false,
-        "IPAM": {
-            "Driver": "default",
-            "Options": {},
-            "Config": [
-                {
-                    "Subnet": "192.168.20.0/24",
-                    "Gateway": "192.168.20.1"
-                }
-            ]
-        },
-        "Internal": false,
-        "Attachable": false,
-        "Ingress": false,
-        "ConfigFrom": {
-            "Network": ""
-        },
-        "ConfigOnly": false,
-        "Containers": {
-            "02df9d392e7e9ccf0242806cd2f3adf8aaf8c7ba778200c51eed911e2306caef": {
-                "Name": "chromecast",
-                "EndpointID": "c1a8836c00799b41008b41922e7aa13eb5fd454943ca66f24eb6f20c84390aa4",
-                "MacAddress": "ca:c8:60:f5:a3:6d",
-                "IPv4Address": "192.168.20.13/24",
-                "IPv6Address": ""
-            },
-            "361fdcde7ce7ad932ed4d5aed6644e43b06d6e2d7df158af66f0b97a44f39d45": {
-                "Name": "thermo1",
-                "EndpointID": "8997f435c9ef34b4a5ce906d0e7427a7d351f1d3aacbfd76894f9ae21970022a",
-                "MacAddress": "c2:6c:9c:2f:d1:0a",
-                "IPv4Address": "192.168.20.14/24",
-                "IPv6Address": ""
-            },
-            "3fc75e6d58de152ac3df1ebf14a016300e01458c40426c2c2293d7b10dee84f5": {
-                "Name": "badge",
-                "EndpointID": "4fa5447ed1c50918da0d49dac86ef04b7b6af0441336df5212e85111bf670f93",
-                "MacAddress": "a2:48:d9:61:cd:40",
-                "IPv4Address": "192.168.20.5/24",
-                "IPv6Address": ""
-            },
-            "8a1e09f77c392d19db4b2c9e99d730b4b964511139f42f4510dc991650015556": {
-                "Name": "sensorhub",
-                "EndpointID": "825d4b164e18ba0dea3dec3cd0cd7a30b452a095d77833522a0e7ed6405799cb",
-                "MacAddress": "4e:26:64:e1:8d:72",
-                "IPv4Address": "192.168.20.7/24",
-                "IPv6Address": ""
-            },
-            "8c3f4602d8e279a1e24d9427e70594e8e0bb16f7c2bf0166e8113ed5434f3918": {
-                "Name": "printer",
-                "EndpointID": "b46c8efdb152d0e72add84d663efdf4a47b33cce9ae8faf8928752888f4d4940",
-                "MacAddress": "72:ff:cf:60:e6:1d",
-                "IPv4Address": "192.168.20.8/24",
-                "IPv6Address": ""
-            },
-            "9af693d38d95b8a69c0ad048487cc529704e5b3eed473eeba2f51e1670439ae0": {
-                "Name": "tv1",
-                "EndpointID": "adc2ba256edcdb7ffdc0cda1c878202eb551065a79c0463639e3b359ff3fb9de",
-                "MacAddress": "ce:bf:55:7d:69:e8",
-                "IPv4Address": "192.168.20.6/24",
-                "IPv6Address": ""
-            },
-            "9ef60339e6ed31d233e8b3ab1e1d0b3f87771b70df0fd8ef94ee851880819e54": {
-                "Name": "lighting",
-                "EndpointID": "a0da684d0131441a3f5bed86b55245df1f0d949c6d373dfb080dfca27e5fc309",
-                "MacAddress": "9a:3b:5e:30:fb:5c",
-                "IPv4Address": "192.168.20.10/24",
-                "IPv6Address": ""
-            },
-            "9f23560d3a000afafafa07da33ce2208baa66e826344b5091b088c9d14162c6d": {
-                "Name": "lock1",
-                "EndpointID": "d50138adeb2c44003d84bf6edd1f7b635adb4aec8d5c2b6648f066a878f00560",
-                "MacAddress": "de:ef:b9:3b:13:a6",
-                "IPv4Address": "192.168.20.9/24",
-                "IPv6Address": ""
-            },
-            "b67d8303b68c6509cc7a83eccf5309f2d57c6fc794dc13c200b4a140661d8c57": {
-                "Name": "energymeter",
-                "EndpointID": "9f24e149f6a3147aef91a140558533b0c58e05a5393173d882728e0a4e2f2a0a",
-                "MacAddress": "72:1e:30:dd:5a:fa",
-                "IPv4Address": "192.168.20.15/24",
-                "IPv6Address": ""
-            },
-            "bc2fd81f0051aab669d9fe59cfbbb7d34d4c20aa297f8e927fc8cefbed45dcb3": {
-                "Name": "cam1",
-                "EndpointID": "97aaaa875dc7d0511017c1faf12cb74824ab9a9da753b1194be778a43b3b7bd0",
-                "MacAddress": "02:05:2c:02:5d:57",
-                "IPv4Address": "192.168.20.4/24",
-                "IPv6Address": ""
-            },
-            "c0509a7fdd383a7c795ac16308e92418635b61fe52d95da068155df43be69a66": {
-                "Name": "envsensor",
-                "EndpointID": "a4f5dc012c799f124c67ecee57ee369f6be448172f4a4aeb51b5051227357fd7",
-                "MacAddress": "52:97:8f:a3:22:07",
-                "IPv4Address": "192.168.20.11/24",
-                "IPv6Address": ""
-            },
-            "d06f2aff140ececb48198653bd27c1d13580d4ec7da7a93c182778157144098f": {
-                "Name": "nvr",
-                "EndpointID": "a46305352714a3af003ee448b5eeec6e0f0245ca06d532e0ed11f006ea9d1997",
-                "MacAddress": "52:1b:1b:4d:31:a9",
-                "IPv4Address": "192.168.20.2/24",
-                "IPv6Address": ""
-            },
-            "e0d7605afdafe5fd7c360b362bafa0cf69920b58faa14a7613cc2310056787d0": {
-                "Name": "plug1",
-                "EndpointID": "04fdc10f714d430d170b416c6e7e0e36c8764231f783286283a5fd5264c84418",
-                "MacAddress": "62:21:ae:37:d2:f9",
-                "IPv4Address": "192.168.20.12/24",
-                "IPv6Address": ""
-            },
-            "efd9728dd6942b609b46428aa47c4a1dd556267e12ad89b68557e49893562c33": {
-                "Name": "bulb1",
-                "EndpointID": "33cbafc59fc3774651126448bd6c83910b5ad418394ad8ed97cb56ba1f08e25e",
-                "MacAddress": "72:d9:99:6d:8e:61",
-                "IPv4Address": "192.168.20.16/24",
-                "IPv6Address": ""
-            },
-            "f2a87c220ea2f0c242341c5e694e98eb0491e5e87e0a20a8383d03d0c86d3abd": {
-                "Name": "nas",
-                "EndpointID": "ed8e8fcac42d1d515bf6df27fbf78dadfa4f82f281c3717b7a87f7d76bd0dd73",
-                "MacAddress": "56:db:47:35:3c:76",
-                "IPv4Address": "192.168.20.3/24",
-                "IPv6Address": ""
-            }
-        },
-        "Options": {
-            "com.docker.network.bridge.name": "docker-iot"
-        },
-        "Labels": {}
-    }
-]
-
-========== docker-network-quar.json ==========
-[
-    {
-        "Name": "quarantine-lan",
-        "Id": "20064fe139d5815aa59aba084d7f748130bd1ea0045b82e3a46afc9bd2bb45bf",
-        "Created": "2026-02-24T06:48:54.517668069+05:30",
-        "Scope": "local",
-        "Driver": "bridge",
-        "EnableIPv4": true,
-        "EnableIPv6": false,
-        "IPAM": {
-            "Driver": "default",
-            "Options": {},
-            "Config": [
-                {
-                    "Subnet": "192.168.30.0/24",
-                    "Gateway": "192.168.30.1"
-                }
-            ]
-        },
-        "Internal": false,
-        "Attachable": false,
-        "Ingress": false,
-        "ConfigFrom": {
-            "Network": ""
-        },
-        "ConfigOnly": false,
-        "Containers": {},
-        "Options": {
-            "com.docker.network.bridge.name": "docker-quar"
-        },
-        "Labels": {}
-    }
-]
-
 ========== .gitignore ==========
 # Logs — too large, not needed on new system
 log-controller.txt
@@ -4337,4 +4266,54 @@ myenv/
 *la.py
 device_history.json
 log-*.txt
+
+========== certs/ (file list only) ==========
+total 16
+drwxr-x---  2 sk sk 4096 Mar 19 21:45 .
+drwxr-x--- 13 sk sk 4096 Mar 29 11:37 ..
+-rw-r--r--  1 sk sk 2049 Mar 19 21:45 gateway.crt
+-rw-r-----  1 sk sk 3272 Mar 19 21:45 gateway.key
+
+========== .env (keys only - no values) ==========
+ENV_KEY: ZT_AUTH_MODE
+ENV_KEY: ZT_USERNAME
+ENV_KEY: ZT_PASSWORD
+ENV_KEY: ZT_JWT_SECRET
+ENV_KEY: TELEGRAM_TOKEN
+ENV_KEY: TELEGRAM_CHAT_ID
+ENV_KEY: TELEGRAM_TIMEOUT
+ENV_KEY: IOT_NET
+ENV_KEY: TRUSTED_NET
+ENV_KEY: QUARANTINE_NET
+ENV_KEY: GATEWAY_IP
+ENV_KEY: LAN_PREFIX
+ENV_KEY: GATEWAY_DEVICE
+ENV_KEY: WAN_IFACE
+ENV_KEY: TRUSTED_IFACE
+ENV_KEY: BRIDGE_IOT
+ENV_KEY: BRIDGE_QUAR
+ENV_KEY: DOCKER_IOT_NET
+ENV_KEY: DOCKER_QUAR_NET
+ENV_KEY: SCAN_THRESHOLD
+ENV_KEY: SCORE_THRESHOLD
+ENV_KEY: SCORE_SOFT_PENALTY
+ENV_KEY: SCORE_HARD_PENALTY
+ENV_KEY: MONITOR_INTERVAL
+ENV_KEY: DISCOVERY_INTERVAL
+ENV_KEY: SLEEP_BETWEEN
+ENV_KEY: SK_HOME
+ENV_KEY: STATIC_DIR
+ENV_KEY: DASHBOARD_HTML
+ENV_KEY: DEVICE_HISTORY
+ENV_KEY: ALERT_LOG
+ENV_KEY: CONTROLLER_LOG
+ENV_KEY: RATELIMIT_LOG
+ENV_KEY: EVENTS_FILE
+ENV_KEY: HEARTBEAT_FILE
+ENV_KEY: TLS_CERT
+ENV_KEY: TLS_KEY
+ENV_KEY: DASHBOARD_PORT
+ENV_KEY: QUARANTINE_SH
+ENV_KEY: RESTORE_SH
+ENV_KEY: BEHAVIOR_MONITOR
 

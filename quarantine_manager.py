@@ -9,6 +9,9 @@ quarantine_manager.py was calling: subprocess.run([QUARANTINE_SH, container])
 Now both pass name + ip consistently.
 """
 import subprocess
+import sys, os
+sys.path.insert(0, os.environ.get("SK_HOME", "/home/sk"))
+from env_loader import env
 from logger import log
 import alert_manager      as am
 import rate_limit_manager as rl
@@ -37,7 +40,7 @@ def quarantine_device(container, ip, reason, device_type, dh, key):
     # BUG FIX: was missing ip arg — script only got container name
     # quarantine_device.sh needs both $1=container and $2=ip
     r = subprocess.run(
-        ["bash", "/home/sk/quarantine_device.sh", container, ip],
+        ["bash", env("QUARANTINE_SH", "/home/sk/quarantine_device.sh"), container, ip],
         capture_output=True, text=True
     )
     log(f"Quarantine result: {r.stdout.strip()}", "ACTION")
