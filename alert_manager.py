@@ -29,6 +29,8 @@ ALERT_MAC_CHANGE    = "MAC_SPOOFING"
 ALERT_SCORE_DROP    = "SCORE_DROP"
 ALERT_RESTORED      = "DEVICE_RESTORED"
 ALERT_EAST_WEST     = "EAST_WEST_ATTEMPT"
+ALERT_JOINED        = "DEVICE_JOINED"
+ALERT_LEFT          = "DEVICE_LEFT"
 
 ICONS = {
     "SCAN_DETECTED"    : "🔍",
@@ -38,6 +40,8 @@ ICONS = {
     "SCORE_DROP"       : "📉",
     "DEVICE_RESTORED"  : "✅",
     "EAST_WEST_ATTEMPT": "🔀",
+    "DEVICE_JOINED"    : "🟢",
+    "DEVICE_LEFT"      : "🔴",
 }
 
 def _write_log(message):
@@ -138,8 +142,56 @@ def send_alert(alert_type, details):
         else:
             message = f"📉 SCORE DROP\n{json.dumps(details)}\nTime: {timestamp}"
 
+    elif alert_type == "DEVICE_JOINED":
+        message = (
+            f"🟢 NEW DEVICE ON NETWORK\n"
+            f"Device : {details.get('device')}\n"
+            f"IP     : {details.get('ip')}\n"
+            f"Action : Fingerprinting and monitoring started\n"
+            f"Time   : {timestamp}"
+        )
+    elif alert_type == "DEVICE_LEFT":
+        message = (
+            f"🔴 DEVICE LEFT NETWORK\n"
+            f"Device : {details.get('device')}\n"
+            f"IP     : {details.get('ip')}\n"
+            f"Action : Marked inactive — rate rules removed\n"
+            f"Time   : {timestamp}"
+        )
+    elif alert_type == "WHITELIST_ADDED":
+        message = (
+            f"📋 WHITELIST RULE ADDED\n"
+            f"From   : {details.get('src')}\n"
+            f"To     : {details.get('dst')}\n"
+            f"Note   : {details.get('note', '')}\n"
+            f"Time   : {timestamp}"
+        )
     else:
         message = f"ℹ️ {alert_type}\n{json.dumps(details)}\nTime: {timestamp}"
 
+    _write_log(message.replace("\n", " | "))
+    _send_telegram(message)
+
+
+def send_attack_summary(attacker_ip, target_count, quarantined_devices):
+    """
+    Send ONE combined Telegram message for an attack + all resulting quarantines.
+    quarantined_devices: list of {"device": name, "ip": ip, "reason": reason}
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        f"🚨 ATTACK SUMMARY",
+        f"Attacker  : {attacker_ip}",
+        f"Targets   : {target_count} IoT devices scanned",
+        f"Time      : {timestamp}",
+        f"",
+        f"🔒 Devices Isolated ({len(quarantined_devices)}):",
+    ]
+    for d in quarantined_devices:
+        lines.append(f"  • {d['device']} ({d['ip']})")
+        reason = d.get('reason', '')
+        if reason:
+            lines.append(f"    Reason: {reason[:80]}")
+    message = "\n".join(lines)
     _write_log(message.replace("\n", " | "))
     _send_telegram(message)

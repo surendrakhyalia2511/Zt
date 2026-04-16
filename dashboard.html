@@ -76,7 +76,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .score-warn{background:rgba(255,184,0,0.1);color:var(--warn)}
 .score-bad{background:rgba(255,59,92,0.12);color:var(--danger)}
 .status-dot{width:8px;height:8px;border-radius:50%}
-.dot-green{background:var(--accent2)}.dot-red{background:var(--danger)}.dot-warn{background:var(--warn)}
+.dot-green{background:var(--accent2)}.dot-red{background:var(--danger)}.dot-warn{background:var(--warn)}.dot-gray{background:#555;opacity:0.6}
 .sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;backdrop-filter:blur(4px);animation:fadeIn 0.2s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .sheet{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-radius:24px 24px 0 0;border-top:1px solid var(--border);padding:0 0 32px;z-index:201;animation:slideUp 0.3s cubic-bezier(0.32,0.72,0,1);max-height:90vh;overflow-y:auto}
@@ -104,7 +104,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .alert-quar{border-left-color:var(--danger)}
 .alert-atk{border-left-color:var(--danger)}
 .alert-rate{border-left-color:var(--warn)}
-.alert-info{border-left-color:var(--accent)}
+.alert-info{border-left-color:var(--accent)}.alert-join{border-left-color:var(--accent2)}.alert-left{border-left-color:#888}
 .alert-time{font-size:11px;color:var(--muted);margin-bottom:3px}
 .alert-msg{font-size:13px;line-height:1.4}
 .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:rgba(13,21,32,0.95);border-top:1px solid var(--border);display:flex;padding:8px 0;padding-bottom:max(8px,env(safe-area-inset-bottom));z-index:100;box-shadow:0 -4px 16px rgba(0,0,0,0.3);backdrop-filter:blur(12px)}
@@ -133,7 +133,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 const {useState,useEffect,useRef,useCallback,useMemo}=React;
 const API='';
 
-// ── Helpers ───────────────────────────────────────────────────
 function calcScore(d){
   let s=100; s-=20;
   if(!d.vendor||d.vendor.includes('Unknown')||d.vendor.includes('locally'))s-=10;
@@ -149,9 +148,10 @@ function parseAlertType(r){
   if(r.includes('QUARANTINED'))return'quar';
   if(r.includes('ATTACKER')||r.includes('SCANNING'))return'atk';
   if(r.includes('SCORE_DROP')||r.includes('RATE'))return'rate';
+  if(r.includes('DEVICE_JOINED')||r.includes('NEW DEVICE'))return'join';
+  if(r.includes('DEVICE_LEFT')||r.includes('LEFT NETWORK'))return'left';
   return'info';
 }
-// ── cleanMsg: strips timestamp, JSON blobs, pipes, emoji — capped at 300 chars ──
 function cleanMsg(r){
   return r.replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*/,'')
     .replace(/\{.*?\}/g,'').replace(/\|+/g,'|')
@@ -183,7 +183,6 @@ function enrich(d){
   };
 }
 
-// ── SVG Sparkline ─────────────────────────────────────────────
 function Sparkline({data,width=80,height=28,color}){
   if(!data||data.length<2)return<span style={{fontSize:11,color:'var(--muted)'}}>—</span>;
   const vals=data.map(p=>p.score||p);
@@ -204,7 +203,6 @@ function Sparkline({data,width=80,height=28,color}){
   );
 }
 
-// ── Bar Chart (SVG) ───────────────────────────────────────────
 function BarChart({data,height=80,color}){
   if(!data||!data.length)return<div className="empty" style={{padding:16}}>No data</div>;
   const max=Math.max(...data.map(d=>d.value),1);
@@ -225,7 +223,6 @@ function BarChart({data,height=80,color}){
   );
 }
 
-// ── Line Chart (SVG) ──────────────────────────────────────────
 function LineChart({points,height=80,color,fill}){
   if(!points||points.length<2)return<div className="empty" style={{padding:8}}>No data yet</div>;
   const vals=points.map(p=>p.y);
@@ -250,7 +247,6 @@ function LineChart({points,height=80,color,fill}){
   );
 }
 
-// ── Donut Chart ───────────────────────────────────────────────
 function DonutChart({segments,size=100}){
   const total=segments.reduce((a,s)=>a+s.value,0)||1;
   let angle=-90;
@@ -274,44 +270,35 @@ function DonutChart({segments,size=100}){
   );
 }
 
-// ── Network Map (SVG) — horizontal tree layout ────────────────
-// YOUR custom layout — kept intact, NOT replaced with radial version
 function NetworkMap({devices}){
   const iot=devices.filter(d=>!d.quarantined&&d.lan==='iot-lan');
   const trusted=devices.filter(d=>d.lan==='c-devices');
   const quar=devices.filter(d=>d.quarantined);
-
   const COLS=5,DSX=68,DSY=50,PAD=22;
   const GW_X=38,LAN_X=130,HUB_W=112,HUB_H=38;
   const HUB_CX=LAN_X+HUB_W/2;
   const DEV_X=HUB_CX+HUB_W/2+28;
   const SPINE_X=DEV_X-20;
-
   const rowsOf=n=>Math.max(1,Math.ceil(n/COLS));
   const blockH=n=>rowsOf(n)*DSY;
-
   const iotH=blockH(iot.length);
   const quarH=blockH(Math.max(quar.length,1));
   const trustedH=blockH(Math.max(trusted.length,1));
-
   const iotY=PAD+iotH/2;
   const quarY=iotY+iotH/2+PAD+quarH/2;
   const trustedY=quarY+quarH/2+PAD+trustedH/2;
   const SVG_H=Math.max(260,trustedY+trustedH/2+PAD);
   const GW_Y=SVG_H/2;
-
   const lans=[
-    {label:'IoT LAN',  subnet:'192.168.20.0/24',devs:iot,    color:'var(--accent)', bg:'rgba(0,212,255,0.08)',icon:'📶',y:iotY},
-    {label:'Isolated', subnet:'192.168.30.0/24',devs:quar,   color:'var(--danger)', bg:'rgba(255,59,92,0.08)',icon:'🔒',y:quarY},
-    {label:'Trusted',  subnet:'192.168.10.0/24',devs:trusted,color:'var(--accent2)',bg:'rgba(0,255,136,0.08)',icon:'💻',y:trustedY},
+    {label:'IoT LAN',subnet:'192.168.20.0/24',devs:iot,color:'var(--accent)',bg:'rgba(0,212,255,0.08)',icon:'📶',y:iotY},
+    {label:'Isolated',subnet:'192.168.30.0/24',devs:quar,color:'var(--danger)',bg:'rgba(255,59,92,0.08)',icon:'🔒',y:quarY},
+    {label:'Trusted',subnet:'192.168.10.0/24',devs:trusted,color:'var(--accent2)',bg:'rgba(0,255,136,0.08)',icon:'💻',y:trustedY},
   ];
-
   return(
     <svg width="100%" height={SVG_H} viewBox={`0 0 760 ${SVG_H}`} style={{overflow:'visible'}}>
       <circle cx={GW_X} cy={GW_Y} r={22} fill="rgba(0,212,255,0.12)" stroke="var(--accent)" strokeWidth="2"/>
       <text x={GW_X} y={GW_Y+1} textAnchor="middle" dominantBaseline="middle" fontSize="16">🛡</text>
       <text x={GW_X} y={GW_Y+33} textAnchor="middle" fontSize="8" fill="var(--accent)" fontWeight="bold">Gateway</text>
-
       {lans.map((lan,li)=>{
         const lanY=lan.y;
         const numRows=Math.ceil(Math.max(lan.devs.length,1)/COLS);
@@ -330,31 +317,24 @@ function NetworkMap({devices}){
             <text x={LAN_X+HUB_W-6} y={lanY+4} textAnchor="end" fontSize="10" fill={lan.color} fontWeight="bold">{lan.devs.length}</text>
             {lan.devs.length>0&&(
               <g>
-                <line x1={LAN_X+HUB_W} y1={lanY} x2={SPINE_X} y2={lanY}
-                  stroke={lan.color} strokeWidth="1" strokeOpacity="0.22"/>
-                {numRows>1&&(
-                  <line x1={SPINE_X} y1={startRowY} x2={SPINE_X} y2={endRowY}
-                    stroke={lan.color} strokeWidth="1" strokeOpacity="0.2"/>
-                )}
+                <line x1={LAN_X+HUB_W} y1={lanY} x2={SPINE_X} y2={lanY} stroke={lan.color} strokeWidth="1" strokeOpacity="0.22"/>
+                {numRows>1&&(<line x1={SPINE_X} y1={startRowY} x2={SPINE_X} y2={endRowY} stroke={lan.color} strokeWidth="1" strokeOpacity="0.2"/>)}
                 {Array.from({length:numRows}).map((_,ri)=>{
                   const ry=startRowY+ri*DSY;
                   const rowDevs=lan.devs.slice(ri*COLS,(ri+1)*COLS);
                   return(
                     <g key={ri}>
-                      <line x1={SPINE_X} y1={ry} x2={DEV_X-14} y2={ry}
-                        stroke={lan.color} strokeWidth="1" strokeOpacity="0.2"/>
+                      <line x1={SPINE_X} y1={ry} x2={DEV_X-14} y2={ry} stroke={lan.color} strokeWidth="1" strokeOpacity="0.2"/>
                       {rowDevs.map((d,ci)=>{
                         const dx=DEV_X+ci*DSX;
                         const s=calcScore(d);
-                        const dc=d.quarantined?'var(--danger)':scoreColor(s);
+                        const dc=d.quarantined?'var(--danger)':d.active===false?'#555':scoreColor(s);
+                        const isInact=d.active===false;
                         return(
-                          <g key={ci}>
-                            {ci>0&&(
-                              <line x1={DEV_X+(ci-1)*DSX+14} y1={ry} x2={dx-14} y2={ry}
-                                stroke={lan.color} strokeWidth="1" strokeOpacity="0.15"/>
-                            )}
-                            <circle cx={dx} cy={ry} r={14} fill={`${dc}22`} stroke={dc} strokeWidth="1.5"/>
-                            <text x={dx} y={ry+1} textAnchor="middle" dominantBaseline="middle" fontSize="11">{d.icon||'📱'}</text>
+                          <g key={ci} opacity={isInact?0.35:1}>
+                            {ci>0&&(<line x1={DEV_X+(ci-1)*DSX+14} y1={ry} x2={dx-14} y2={ry} stroke={lan.color} strokeWidth="1" strokeOpacity="0.15"/>)}
+                            <circle cx={dx} cy={ry} r={14} fill={isInact?'transparent':`${dc}22`} stroke={dc} strokeWidth={isInact?1:1.5} strokeDasharray={isInact?"3,2":"none"}/>
+                            <text x={dx} y={ry+1} textAnchor="middle" dominantBaseline="middle" fontSize="11" opacity={isInact?0.4:1}>{d.icon||'📱'}</text>
                             <text x={dx} y={ry+22} textAnchor="middle" fontSize="7" fill="var(--textdim)">{(d.friendly_name||d.name).slice(0,9)}</text>
                           </g>
                         );
@@ -364,9 +344,7 @@ function NetworkMap({devices}){
                 })}
               </g>
             )}
-            {lan.devs.length===0&&(
-              <text x={LAN_X+HUB_W+18} y={lanY+4} fontSize="8" fill="var(--textdim)" opacity="0.45">— none —</text>
-            )}
+            {lan.devs.length===0&&(<text x={LAN_X+HUB_W+18} y={lanY+4} fontSize="8" fill="var(--textdim)" opacity="0.45">— none —</text>)}
           </g>
         );
       })}
@@ -374,7 +352,6 @@ function NetworkMap({devices}){
   );
 }
 
-// ── Login ─────────────────────────────────────────────────────
 function LoginScreen({onLogin}){
   const[user,setUser]=useState('admin');
   const[pass,setPass]=useState('');
@@ -389,7 +366,7 @@ function LoginScreen({onLogin}){
         body:JSON.stringify({username:user,password:pass})});
       if(r.ok){
         const data=await r.json();
-        if(data.token){window._zt_token=data.token;sessionStorage.setItem('zt_token',data.token)}
+        if(data.token){window._zt_token=data.token;sessionStorage.setItem('zt_token',data.token);}
         onLogin();
       }else{const d=await r.json();setErr(d.detail||'Invalid credentials')}
     }catch(e){setErr('Connection failed')}
@@ -414,7 +391,6 @@ function LoginScreen({onLogin}){
   );
 }
 
-// ── Device Sheet ──────────────────────────────────────────────
 function DeviceSheet({device,onClose,onAction,loading}){
   if(!device)return null;
   const score=calcScore(device);
@@ -454,10 +430,9 @@ function DeviceSheet({device,onClose,onAction,loading}){
             </div>
           </div>
         )}
-        {/* Info rows — no inline Reason row; deductions shown as badges below */}
         {[['MAC Address',device.mac],['Manufacturer',device.manufacturer||'Unknown'],
           ['Network Zone',device.lan],['Open Ports',(device.ports||[]).join(', ')||'—'],
-          ['Status',isQuar?'🔒 Isolated':'✅ Active'],
+          ['Status',isQuar?'🔒 Isolated':device.active===false?'⬤ Inactive':'✅ Active'],
           ['Rate Penalty',device.rl_penalty>0?`-${device.rl_penalty} pts`:'None'],
         ].map(([label,val])=>(
           <div className="sheet-info-row" key={label}>
@@ -465,23 +440,17 @@ function DeviceSheet({device,onClose,onAction,loading}){
             <span className="sheet-info-val">{val}</span>
           </div>
         ))}
-        {/* Score Deductions — badge pills, shown for ALL devices with deductions */}
         {(device.score_reasons||[]).length>0&&(
           <div style={{padding:'12px 16px',borderBottom:'1px solid var(--border)'}}>
-            <div style={{fontSize:12,color:'var(--muted)',marginBottom:6,textTransform:'uppercase',letterSpacing:'0.5px'}}>
-              Score Deductions
-            </div>
+            <div style={{fontSize:12,color:'var(--muted)',marginBottom:6,textTransform:'uppercase',letterSpacing:'0.5px'}}>Score Deductions</div>
             <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
               {(device.score_reasons||[]).map((r,i)=>{
                 const isSevere=r.includes('50')||r.includes('40')||r.includes('35')||r.includes('30');
                 return(
-                  <span key={i} style={{
-                    padding:'3px 8px',borderRadius:6,fontSize:11,fontWeight:600,
+                  <span key={i} style={{padding:'3px 8px',borderRadius:6,fontSize:11,fontWeight:600,
                     background:isSevere?'rgba(255,59,92,0.12)':'rgba(255,184,0,0.1)',
-                    color:isSevere?'var(--danger)':'var(--warn)',
-                    border:'1px solid',
-                    borderColor:isSevere?'rgba(255,59,92,0.3)':'rgba(255,184,0,0.3)',
-                  }}>
+                    color:isSevere?'var(--danger)':'var(--warn)',border:'1px solid',
+                    borderColor:isSevere?'rgba(255,59,92,0.3)':'rgba(255,184,0,0.3)'}}>
                     {r}
                   </span>
                 );
@@ -490,7 +459,6 @@ function DeviceSheet({device,onClose,onAction,loading}){
           </div>
         )}
         <div className="sheet-actions">
-          {/* YOUR guard: hide Isolate for c-devices (trusted zone) */}
           {device.lan!=='c-devices'&&!isQuar&&(
             <button className="action-btn btn-quarantine" disabled={loading===device.name}
                 onClick={()=>onAction('quarantine',device.name)}>
@@ -510,8 +478,6 @@ function DeviceSheet({device,onClose,onAction,loading}){
   );
 }
 
-// ── Devices Tab ───────────────────────────────────────────────
-// YOUR version — three sections: IoT / Isolated / C-Devices
 function DevicesTab({devices,onSelect}){
   const iot=devices.filter(d=>!d.quarantined&&d.lan==='iot-lan');
   const trusted=devices.filter(d=>d.lan==='c-devices');
@@ -523,19 +489,15 @@ function DevicesTab({devices,onSelect}){
     const hist=d.score_history||[];
     return(
       <div className={`device-row${isQuar?' quarantined':isWarn?' at-risk':''}`} onClick={()=>onSelect(d)}>
-        <div className={`device-icon-wrap ${isQuar?'icon-quarantine':isWarn?'icon-warn':'icon-normal'}`}>
-          {d.icon||'📱'}
-        </div>
+        <div className={`device-icon-wrap ${isQuar?'icon-quarantine':isWarn?'icon-warn':'icon-normal'}`}>{d.icon||'📱'}</div>
         <div className="device-info">
           <div className="device-name">{d.friendly_name||d.name}</div>
-          <div className="device-meta">{d.type} · {d.ip}</div>
+          <div className="device-meta">{d.type} · {d.ip}{d.active===false&&<span style={{marginLeft:6,fontSize:10,color:'var(--muted)',fontWeight:600,background:'rgba(255,255,255,0.06)',padding:'1px 6px',borderRadius:4}}>⬤ INACTIVE</span>}</div>
         </div>
         <div className="device-right">
-          {hist.length>=2
-            ?<Sparkline data={hist} width={48} height={20} color={scoreColor(score)}/>
-            :null}
+          {hist.length>=2?<Sparkline data={hist} width={48} height={20} color={scoreColor(score)}/>:null}
           <span className={`score-badge ${scoreClass(score)}`}>{score}</span>
-          <div className={`status-dot ${isQuar?'dot-red':isWarn?'dot-warn':'dot-green'}`}/>
+          <div title={d.active===false&&d.last_seen?`Last seen: ${d.last_seen}`:''} className={`status-dot ${isQuar?'dot-red':(d.active===false)?'dot-gray':isWarn?'dot-warn':'dot-green'}`}/>
         </div>
       </div>
     );
@@ -574,10 +536,8 @@ function DevicesTab({devices,onSelect}){
   );
 }
 
-// ── Charts Tab ────────────────────────────────────────────────
 function ChartsTab({devices,alerts}){
-  const scores=devices.map(d=>({name:d.friendly_name||d.name,score:calcScore(d),icon:d.icon||'📱'}))
-    .sort((a,b)=>a.score-b.score);
+  const scores=devices.map(d=>({name:d.friendly_name||d.name,score:calcScore(d),icon:d.icon||'📱'})).sort((a,b)=>a.score-b.score);
   const dist=[
     {label:'Trusted (≥60)',value:devices.filter(d=>!d.quarantined&&calcScore(d)>=60).length,color:'var(--accent2)'},
     {label:'At Risk (40-59)',value:devices.filter(d=>!d.quarantined&&calcScore(d)<60&&calcScore(d)>=40).length,color:'var(--warn)'},
@@ -585,10 +545,7 @@ function ChartsTab({devices,alerts}){
   ];
   const total=devices.length||1;
   const alertByDate={};
-  alerts.forEach(a=>{
-    const date=(a.timestamp||'').slice(0,10);
-    if(date)alertByDate[date]=(alertByDate[date]||0)+1;
-  });
+  alerts.forEach(a=>{const date=(a.timestamp||'').slice(0,10);if(date)alertByDate[date]=(alertByDate[date]||0)+1;});
   const alertPts=Object.entries(alertByDate).slice(-7).map(([d,v])=>({x:d,y:v}));
   const avgHistory=[];
   const maxLen=Math.max(...devices.map(d=>(d.score_history||[]).length),0);
@@ -601,10 +558,7 @@ function ChartsTab({devices,alerts}){
   return(
     <div>
       <div className="chart-card">
-        <div className="chart-title">
-          <span>Trust Distribution</span>
-          <span className="chart-val">{devices.length} devices</span>
-        </div>
+        <div className="chart-title"><span>Trust Distribution</span><span className="chart-val">{devices.length} devices</span></div>
         <div style={{display:'flex',alignItems:'center',gap:20}}>
           <DonutChart segments={dist.filter(d=>d.value>0)} size={90}/>
           <div style={{flex:1}}>
@@ -619,7 +573,6 @@ function ChartsTab({devices,alerts}){
           </div>
         </div>
       </div>
-
       <div className="chart-card">
         <div className="chart-title"><span>Device Trust Scores</span></div>
         <div style={{overflowX:'auto',paddingBottom:4}}>
@@ -627,53 +580,32 @@ function ChartsTab({devices,alerts}){
             <BarChart height={70} data={scores.map(d=>({value:d.score,color:scoreColor(d.score),label:d.name}))}/>
             <div style={{display:'flex',gap:2,paddingTop:4}}>
               {scores.map(d=>(
-                <div key={d.name} style={{flex:1,textAlign:'center',fontSize:9,color:'var(--muted)',overflow:'hidden'}}>
-                  {d.icon}
-                </div>
+                <div key={d.name} style={{flex:1,textAlign:'center',fontSize:9,color:'var(--muted)',overflow:'hidden'}}>{d.icon}</div>
               ))}
             </div>
           </div>
         </div>
       </div>
-
       {avgHistory.length>=2&&(
         <div className="chart-card">
-          <div className="chart-title">
-            <span>Avg Trust Trend</span>
-            <span style={{fontSize:13,color:'var(--accent2)',fontWeight:700}}>
-              {avgHistory[avgHistory.length-1]?.y}
-            </span>
-          </div>
+          <div className="chart-title"><span>Avg Trust Trend</span><span style={{fontSize:13,color:'var(--accent2)',fontWeight:700}}>{avgHistory[avgHistory.length-1]?.y}</span></div>
           <LineChart points={avgHistory} height={60} color="var(--accent)" fill={true}/>
         </div>
       )}
-
       {alertPts.length>0&&(
         <div className="chart-card">
-          <div className="chart-title">
-            <span>Alert Activity</span>
-            <span style={{fontSize:13,color:'var(--warn)',fontWeight:700}}>{alerts.length} total</span>
-          </div>
+          <div className="chart-title"><span>Alert Activity</span><span style={{fontSize:13,color:'var(--warn)',fontWeight:700}}>{alerts.length} total</span></div>
           <LineChart points={alertPts} height={60} color="var(--warn)" fill={true}/>
           <div style={{display:'flex',justifyContent:'space-between',marginTop:6,fontSize:10,color:'var(--muted)'}}>
             {alertPts.map(p=><span key={p.x}>{p.x.slice(5)}</span>)}
           </div>
         </div>
       )}
-
-      {/* Rate Violation History */}
       <div className="chart-card">
-        <div className="chart-title">
-          <span>Rate Violation History</span>
-          <span style={{fontSize:10,color:'var(--muted)'}}>from alert log</span>
-        </div>
-        <div style={{fontSize:11,color:'var(--muted)',marginBottom:8}}>
-          Each entry = NEW connections/min exceeded threshold. Different from active TCP connections.
-        </div>
+        <div className="chart-title"><span>Rate Violation History</span><span style={{fontSize:10,color:'var(--muted)'}}>from alert log</span></div>
+        <div style={{fontSize:11,color:'var(--muted)',marginBottom:8}}>Each entry = NEW connections/min exceeded threshold.</div>
         {alerts.filter(a=>(a.raw||'').includes('RATE')).slice(0,8).length===0
-          ?<div className="empty" style={{padding:'8px 0'}}>
-              <div style={{fontSize:20,marginBottom:4}}>✅</div>No rate violations in log
-            </div>
+          ?<div className="empty" style={{padding:'8px 0'}}><div style={{fontSize:20,marginBottom:4}}>✅</div>No rate violations in log</div>
           :<div>
             {alerts.filter(a=>(a.raw||'').includes('RATE')).slice(0,8).map((a,i)=>{
               const isHard=(a.raw||'').includes('HARD')||(a.raw||'').includes('EXCEEDED');
@@ -681,9 +613,7 @@ function ChartsTab({devices,alerts}){
               return(
                 <div key={i} style={{padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
                   <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
-                    <span style={{fontSize:12,fontWeight:600,color:isHard?'var(--danger)':'var(--warn)'}}>
-                      {isHard?'🚨 HARD VIOLATION':'⚠️  SOFT WARNING'}
-                    </span>
+                    <span style={{fontSize:12,fontWeight:600,color:isHard?'var(--danger)':'var(--warn)'}}>{isHard?'🚨 HARD VIOLATION':'⚠️ SOFT WARNING'}</span>
                     <span style={{fontSize:10,color:'var(--muted)'}}>{a.timestamp}</span>
                   </div>
                   <div style={{fontSize:11,color:'var(--textdim)'}}>{msg}</div>
@@ -693,128 +623,325 @@ function ChartsTab({devices,alerts}){
           </div>
         }
       </div>
-
-      {/* Rate Limit Status */}
-      <div className="chart-card">
-        <div className="chart-title">
-          <span>Rate Limit Status</span>
-          <span style={{fontSize:10,color:'var(--muted)'}}>NEW conns/min</span>
-        </div>
-        <div style={{fontSize:11,color:'var(--muted)',marginBottom:8,padding:'4px 0',borderBottom:'1px solid var(--border)'}}>
-          Rate = NEW TCP connection attempts per minute (not bytes/packets)
-        </div>
-        {devices.filter(d=>d.rl_penalty>0).length===0
-          ?<div className="empty" style={{padding:'8px 0'}}>
-              <div style={{fontSize:24,marginBottom:4}}>✅</div>
-              No active rate violations
-            </div>
-          :<div>
-            {devices.filter(d=>d.rl_penalty>0).map(d=>(
-              <div key={d.name} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
-                <span style={{fontSize:18}}>{d.icon}</span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:600}}>{d.friendly_name||d.name}</div>
-                  <div style={{fontSize:10,color:'var(--muted)'}}>
-                    {d.rl_penalty===10?'SOFT — burst above base rate (auto-recovers)':'HARD — flood above ceiling (admin reset required)'}
-                  </div>
-                </div>
-                <span style={{fontSize:13,fontWeight:700,color:d.rl_penalty===10?'var(--warn)':'var(--danger)'}}>
-                  {d.rl_penalty===10?'⚠️ SOFT':'🚨 HARD'} -{d.rl_penalty}pts
-                </span>
-              </div>
-            ))}
-          </div>
-        }
-      </div>
     </div>
   );
 }
 
-// ── Alerts Tab ────────────────────────────────────────────────
-function AlertsTab({alerts}){
-  if(!alerts.length)return(
-    <div className="empty">
-      <div className="empty-icon">✅</div>No alerts — network is clean
+function GroupedAttackerAlert({alerts,allAlerts}){
+  const groups={};
+  alerts.forEach(a=>{
+    const raw=a.raw||a.message||'';
+    if(!raw.includes('EXTERNAL_ATTACKER')&&!raw.includes('ATTACKER DETECTED'))return;
+    const ipMatch=raw.match(/Attacker\s*[:|]\s*([\d.]+)/i)||raw.match(/([\d]+\.[\d]+\.[\d]+\.[\d]+)/);
+    const ip=ipMatch?ipMatch[1]:'Unknown';
+    const key=ip+'|'+(a.timestamp||'');
+    if(!groups[key])groups[key]={ip,key,alerts:[a],targets:new Set(),quarantined:[],time:a.timestamp};
+    else groups[key].alerts.push(a);
+    const tMatch=raw.match(/Targets?\s*[:|]\s*(\d+)/i);
+    if(tMatch)for(let i=0;i<parseInt(tMatch[1]);i++)groups[key].targets.add(i);
+  });
+  Object.values(groups).forEach(g=>{
+    g.targetIPs=new Set();
+    g.alerts.forEach(a=>{
+      const raw=a.raw||a.message||'';
+      const allIPs=raw.match(/192\.168\.20\.\d+/g)||[];
+      allIPs.forEach(ip=>g.targetIPs.add(ip));
+    });
+    const attackMs=g.time?new Date(g.time).getTime():0;
+    if(attackMs&&allAlerts){
+      allAlerts.forEach(a=>{
+        const raw=a.raw||a.message||'';
+        if(!raw.includes('QUARANTINED'))return;
+        const aMs=a.timestamp?new Date(a.timestamp).getTime():0;
+        if(aMs&&Math.abs(aMs-attackMs)<90000){
+          const closestAttack=Object.values(groups).reduce((best,grp)=>{
+            const gMs=grp.time?new Date(grp.time).getTime():0;
+            const bMs=best?new Date(best.time||0).getTime():Infinity;
+            return Math.abs(aMs-gMs)<Math.abs(aMs-bMs)?grp:best;
+          },null);
+          if(closestAttack&&closestAttack.key===g.key){g.quarantined.push(a);}
+        }
+      });
+    }
+  });
+  const [expanded,setExpanded]=React.useState({});
+  const toggle=k=>setExpanded(p=>({...p,[k]:!p[k]}));
+  return Object.values(groups).sort((a,b)=>(b.time||'').localeCompare(a.time||'')).map(g=>(
+    <div key={g.key||g.ip} className="alert-card alert-atk" style={{marginBottom:8}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}} onClick={()=>toggle(g.key||g.ip)}>
+        <div>
+          <span style={{fontSize:12,fontWeight:700,color:'var(--danger)'}}>🚨 EXTERNAL ATTACKER — {g.ip}</span>
+          <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{g.time} · {g.targetIPs.size||g.targets.size||'?'} IoT devices targeted · {g.quarantined.length} isolated</div>
+        </div>
+        <span style={{fontSize:16,color:'var(--muted)'}}>{expanded[g.key||g.ip]?'▲':'▼'}</span>
+      </div>
+      {expanded[g.key||g.ip]&&(
+        <div style={{marginTop:8,borderTop:'1px solid var(--border)',paddingTop:8}}>
+          {g.quarantined.length>0&&(
+            <div style={{marginBottom:8,padding:'8px',background:'rgba(255,59,92,0.06)',borderRadius:6}}>
+              <div style={{fontSize:11,fontWeight:600,color:'var(--danger)',marginBottom:8}}>🎯 Devices Attacked + Isolated ({g.quarantined.length})</div>
+              {g.quarantined.map((a,i)=>{
+                const devM=(a.raw||'').match(/Device\s*:\s*(\S+)/i);
+                const ipM=(a.raw||'').match(/IP\s*:\s*([\d.]+)/i);
+                const reasonM=(a.raw||'').match(/Reason\s*:\s*([^|\n]+)/i);
+                return(
+                  <div key={i} style={{padding:'5px 0',fontSize:12,borderBottom:i<g.quarantined.length-1?'1px solid rgba(255,59,92,0.1)':'none'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span>🔒</span>
+                      <span style={{fontWeight:600,color:'var(--text)'}}>{devM?devM[1]:'Unknown'}</span>
+                      <span style={{fontFamily:'monospace',color:'var(--muted)',fontSize:11}}>{ipM?ipM[1]:''}</span>
+                      <span style={{marginLeft:'auto',fontSize:10,color:'var(--muted)'}}>{(a.timestamp||'').slice(11,19)}</span>
+                    </div>
+                    {reasonM&&<div style={{fontSize:10,color:'var(--muted)',marginLeft:24,marginTop:2}}>{reasonM[1].trim().slice(0,80)}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {g.quarantined.length===0&&g.targetIPs.size>0&&(
+            <div style={{marginBottom:8,padding:'6px 8px',background:'rgba(255,59,92,0.06)',borderRadius:6}}>
+              <div style={{fontSize:11,fontWeight:600,color:'var(--danger)',marginBottom:6}}>🎯 Targeted IPs ({g.targetIPs.size})</div>
+              {[...g.targetIPs].sort().map(ip=>(
+                <div key={ip} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0',fontSize:12,color:'var(--textdim)'}}>
+                  <span style={{width:6,height:6,borderRadius:'50%',background:'var(--danger)',display:'inline-block',flexShrink:0}}/>
+                  <span style={{fontFamily:'monospace'}}>{ip}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',marginBottom:4}}>Alert Log</div>
+          {g.alerts.map((a,i)=>(
+            <div key={i} style={{fontSize:11,color:'var(--textdim)',padding:'4px 0',borderBottom:i<g.alerts.length-1?'1px solid var(--border)':'none'}}>
+              <span style={{color:'var(--muted)',marginRight:8}}>{a.timestamp}</span>
+              {cleanMsg(a.raw||a.message||'')}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
-  );
+  ));
+}
+
+function AlertsTab({alerts}){
+  if(!alerts.length)return(<div className="empty"><div className="empty-icon">✅</div>No alerts — network is clean</div>);
+  const attackerAlerts=alerts.filter(a=>{const r=a.raw||a.message||'';return r.includes('EXTERNAL_ATTACKER')||r.includes('ATTACKER DETECTED');});
+  const joinAlerts=alerts.filter(a=>(a.raw||a.message||'').includes('NEW DEVICE ON NETWORK'));
+  const attackWindows=attackerAlerts.map(a=>a.timestamp?new Date(a.timestamp).getTime():0).filter(Boolean);
+  const isRelatedQuar=(a)=>{
+    const r=a.raw||a.message||'';
+    if(!r.includes('QUARANTINED'))return false;
+    const aMs=a.timestamp?new Date(a.timestamp).getTime():0;
+    return attackWindows.some(t=>Math.abs(aMs-t)<90000);
+  };
+  const otherAlerts=alerts.filter(a=>{
+    const r=a.raw||a.message||'';
+    return !r.includes('EXTERNAL_ATTACKER')&&!r.includes('ATTACKER DETECTED')&&!r.includes('NEW DEVICE ON NETWORK')&&!isRelatedQuar(a);
+  });
+  const joinGroups={};
+  joinAlerts.forEach(a=>{
+    const min=(a.timestamp||'').slice(0,16);
+    if(!joinGroups[min])joinGroups[min]={time:a.timestamp,alerts:[],devices:[]};
+    joinGroups[min].alerts.push(a);
+    const devMatch=(a.raw||'').match(/Device\s*:\s*(\S+)/i);
+    const ipMatch=(a.raw||'').match(/IP\s*:\s*([\d.]+)/i);
+    if(devMatch)joinGroups[min].devices.push({name:devMatch[1],ip:ipMatch?ipMatch[1]:''});
+  });
+  const [joinExp,setJoinExp]=React.useState({});
+  const toggleJoin=k=>setJoinExp(p=>({...p,[k]:!p[k]}));
+  const allGroupItems=[
+    ...attackerAlerts.map(a=>({type:'atk',a,ts:a.timestamp||''})),
+    ...Object.values(joinGroups).map(g=>({type:'join',g,ts:g.time||''})),
+  ].sort((x,y)=>y.ts.localeCompare(x.ts));
   return(
     <div className="alert-list">
-      {alerts.slice(0,60).map((a,i)=>{
-        const type=parseAlertType(a.raw||'');
-        const msg=cleanMsg(a.raw||a.message||'');
+      {allGroupItems.map((item,idx)=>{
+        if(item.type==='atk')return(<GroupedAttackerAlert key={'atk'+idx} alerts={[item.a]} allAlerts={alerts}/>);
+        const g=item.g;
+        const min=Object.keys(joinGroups).find(k=>joinGroups[k]===g)||idx;
         return(
-          <div key={i} className={`alert-card alert-${type}`}>
-            <div className="alert-time">{a.timestamp}</div>
-            <div className="alert-msg">{msg}</div>
+          <div key={min} className="alert-card alert-join" style={{marginBottom:8}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:g.devices.length>1?'pointer':'default'}} onClick={()=>g.devices.length>1&&toggleJoin(min)}>
+              <div>
+                <span style={{fontSize:12,fontWeight:700,color:'var(--accent2)'}}>🟢 {g.devices.length>1?`${g.devices.length} NEW DEVICES JOINED`:'NEW DEVICE JOINED'}</span>
+                <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{g.time}</div>
+              </div>
+              {g.devices.length>1&&(<span style={{fontSize:14,color:'var(--muted)'}}>{joinExp[min]?'▲':'▼'}</span>)}
+            </div>
+            {(g.devices.length===1||joinExp[min])&&(
+              <div style={{marginTop:6,borderTop:'1px solid var(--border)',paddingTop:6}}>
+                {g.devices.map((d,i)=>(
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0',fontSize:12,color:'var(--textdim)'}}>
+                    <span style={{width:6,height:6,borderRadius:'50%',background:'var(--accent2)',display:'inline-block',flexShrink:0}}/>
+                    <span style={{fontWeight:600}}>{d.name}</span>
+                    <span style={{fontFamily:'monospace',color:'var(--muted)',fontSize:11}}>{d.ip}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}
+      {(()=>{
+        const restoredAlerts=otherAlerts.filter(a=>(a.raw||a.message||'').includes('DEVICE RESTORED'));
+        const restGroups={};
+        restoredAlerts.forEach(a=>{
+          const min=(a.timestamp||'').slice(0,16);
+          if(!restGroups[min])restGroups[min]={time:a.timestamp,alerts:[],devices:[]};
+          restGroups[min].alerts.push(a);
+          const devM=(a.raw||'').match(/Device\s*:\s*(\S+)/i);
+          const ipM=(a.raw||'').match(/IP\s*:\s*([\d.]+)/i);
+          if(devM)restGroups[min].devices.push({name:devM[1],ip:ipM?ipM[1]:''});
+        });
+        const nonRestored=otherAlerts.filter(a=>!(a.raw||a.message||'').includes('DEVICE RESTORED'));
+        const [restExp,setRestExp]=React.useState({});
+        const allItems=[
+          ...Object.values(restGroups).map(g=>({type:'restore',g,ts:g.time})),
+          ...nonRestored.map(a=>({type:'alert',a,ts:a.timestamp})),
+        ].sort((x,y)=>(y.ts||'').localeCompare(x.ts||''));
+        return allItems.slice(0,80).map((item,i)=>{
+          if(item.type==='restore'){
+            const g=item.g;
+            const min=(g.time||'').slice(0,16);
+            const single=g.devices.length===1;
+            return(
+              <div key={'r'+i} className="alert-card" style={{borderLeft:'3px solid var(--accent2)',marginBottom:8}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:single?'default':'pointer'}} onClick={()=>!single&&setRestExp(p=>({...p,[min]:!p[min]}))}>
+                  <div>
+                    <span style={{fontSize:12,fontWeight:700,color:'var(--accent2)'}}>✅ {single?'DEVICE RESTORED':`${g.devices.length} DEVICES RESTORED`}</span>
+                    <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{g.time}</div>
+                  </div>
+                  {!single&&<span style={{fontSize:14,color:'var(--muted)'}}>{restExp[min]?'▲':'▼'}</span>}
+                </div>
+                {(single||restExp[min])&&(
+                  <div style={{marginTop:6,borderTop:'1px solid rgba(0,255,136,0.1)',paddingTop:6}}>
+                    {g.devices.map((d,j)=>(
+                      <div key={j} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0',fontSize:12,color:'var(--textdim)'}}>
+                        <span style={{width:6,height:6,borderRadius:'50%',background:'var(--accent2)',display:'inline-block',flexShrink:0}}/>
+                        <span style={{fontWeight:600}}>{d.name}</span>
+                        <span style={{fontFamily:'monospace',color:'var(--muted)',fontSize:11}}>{d.ip}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+          const type=parseAlertType(item.a.raw||'');
+          const msg=cleanMsg(item.a.raw||item.a.message||'');
+          return(
+            <div key={'a'+i} className={`alert-card alert-${type}`} style={{marginBottom:8}}>
+              <div className="alert-time">{item.a.timestamp}</div>
+              <div className="alert-msg">{msg}</div>
+            </div>
+          );
+        });
+      })()}
     </div>
   );
 }
 
-// ── Network Tab ───────────────────────────────────────────────
-// YOUR expandable zone cards + onSelect — kept intact
-// File 6 additions: broader IoT filter (lan!=='c-devices') + dynamic subnets from device IPs
-function NetworkTab({devices,onSelect}){
-  const[expanded,setExpanded]=useState(null);
-
-  // Dynamic subnet helper — reads from actual device IPs, falls back to a default
-  const subnet=ip=>ip?ip.split('.').slice(0,3).join('.')+'.0/24':null;
-
-  const lans={
-    'IoT Network':{
-      devices:devices.filter(d=>!d.quarantined&&d.lan!=='c-devices'),
-      color:'var(--accent)',
-      subnet:(()=>{const d=devices.find(x=>!x.quarantined&&x.lan==='iot-lan');return subnet(d?.ip)||'192.168.20.0/24';})(),
-      icon:'📶',
-    },
-    'Isolated Zone':{
-      devices:devices.filter(d=>d.quarantined),
-      color:'var(--danger)',
-      subnet:(()=>{const d=devices.find(x=>x.quarantined);return subnet(d?.ip)||'192.168.30.0/24';})(),
-      icon:'🔒',
-    },
-    'C-Devices':{
-      devices:devices.filter(d=>d.lan==='c-devices'),
-      color:'var(--accent2)',
-      subnet:(()=>{const d=devices.find(x=>x.lan==='c-devices');return subnet(d?.ip)||'192.168.10.0/24';})(),
-      icon:'💻',
-    },
+function WhitelistPanel({devices,isAdmin}){
+  const[rules,setRules]=React.useState([]);
+  const[src,setSrc]=React.useState('');
+  const[dst,setDst]=React.useState('');
+  const[note,setNote]=React.useState('');
+  const[msg,setMsg]=React.useState('');
+  const[open,setOpen]=React.useState(false);
+  const iotDevices=devices.filter(d=>!d.quarantined&&d.lan!=='c-devices');
+  React.useEffect(()=>{authFetch('/api/whitelist').then(r=>r.ok?r.json():null).then(d=>d&&setRules(d.rules||[]));},[]);
+  const addRule=async()=>{
+    if(!src||!dst){setMsg('Select source and destination');return;}
+    const r=await authFetch('/api/whitelist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({src,dst,note})});
+    if(r.ok){const d=await r.json();setRules(prev=>[...prev,d.rule]);setSrc('');setDst('');setNote('');setMsg('✅ Rule added');setTimeout(()=>setMsg(''),3000);}
+    else{const e=await r.json();setMsg('❌ '+(e.detail||'Failed'));}
   };
+  const delRule=async(rule)=>{
+    const r=await authFetch('/api/whitelist',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({src:rule.src,dst:rule.dst})});
+    if(r.ok)setRules(prev=>prev.filter(x=>!(x.src===rule.src&&x.dst===rule.dst)));
+  };
+  return(
+    <div className="zone-card" style={{marginBottom:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}} onClick={()=>setOpen(p=>!p)}>
+        <div style={{fontSize:15,fontWeight:700}}>📋 IoT Communication Whitelist</div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:11,background:'rgba(0,212,255,0.1)',color:'var(--accent)',padding:'2px 8px',borderRadius:8}}>{rules.length} rules</span>
+          <span style={{fontSize:11,color:'var(--muted)'}}>{open?'▲':'▼'}</span>
+        </div>
+      </div>
+      <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>Allow specific IoT devices to communicate with each other (overrides east-west block)</div>
+      {open&&(
+        <div style={{marginTop:12,borderTop:'1px solid var(--border)',paddingTop:12}}>
+          {rules.length===0&&<div style={{fontSize:12,color:'var(--muted)',marginBottom:8}}>No rules yet — all IoT-to-IoT traffic is blocked by default</div>}
+          {rules.map((r,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'7px 0',borderBottom:'1px solid var(--border)',fontSize:13}}>
+              <span style={{fontWeight:600,color:'var(--accent)',fontSize:13}}>{r.src}</span>
+              <span style={{color:'var(--muted)',margin:'0 6px'}}>→</span>
+              <span style={{fontWeight:600,color:'var(--accent2)',fontSize:13}}>{r.dst}</span>
+              <span style={{flex:1,fontSize:11,color:'var(--muted)',overflow:'hidden',textOverflow:'ellipsis'}}>{r.note}</span>
+              {isAdmin&&<button onClick={()=>delRule(r)} style={{background:'rgba(255,59,92,0.15)',color:'var(--danger)',border:'none',borderRadius:6,padding:'3px 10px',fontSize:12,cursor:'pointer'}}>✕</button>}
+            </div>
+          ))}
+          {isAdmin&&(
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:12,fontWeight:600,color:'var(--textdim)',marginBottom:8}}>Add New Rule (Admin only)</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                <select value={src} onChange={e=>setSrc(e.target.value)} style={{background:'var(--surface)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 10px',fontSize:13}}>
+                  <option value=''>Source device...</option>
+                  {iotDevices.map(d=><option key={d.name} value={d.name}>{d.friendly_name||d.name} ({d.ip})</option>)}
+                </select>
+                <select value={dst} onChange={e=>setDst(e.target.value)} style={{background:'var(--surface)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 10px',fontSize:13}}>
+                  <option value=''>Destination device...</option>
+                  {iotDevices.map(d=><option key={d.name} value={d.name}>{d.friendly_name||d.name} ({d.ip})</option>)}
+                </select>
+              </div>
+              <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Note (e.g. envsensor → thermostat data sync)"
+                style={{width:'100%',background:'var(--surface)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 10px',fontSize:13,marginBottom:8,boxSizing:'border-box'}}/>
+              <button onClick={addRule} style={{width:'100%',background:'var(--accent)',color:'#000',border:'none',borderRadius:8,padding:'10px',fontSize:14,fontWeight:700,cursor:'pointer'}}>+ Add Whitelist Rule</button>
+              {msg&&<div style={{marginTop:6,fontSize:12,color:msg.startsWith('✅')?'var(--accent2)':'var(--danger)'}}>{msg}</div>}
+            </div>
+          )}
+          {!isAdmin&&<div style={{marginTop:8,fontSize:11,color:'var(--muted)',fontStyle:'italic'}}>🔒 Admin login required to add or remove rules</div>}
+        </div>
+      )}
+    </div>
+  );
+}
 
+function NetworkTab({devices,onSelect,isAdmin}){
+  const[expanded,setExpanded]=useState(null);
+  const subnet=ip=>ip?ip.split('.').slice(0,3).join('.')+'.0/24':null;
+  const lans={
+    'IoT Network':{devices:devices.filter(d=>!d.quarantined&&d.lan!=='c-devices'),color:'var(--accent)',subnet:(()=>{const d=devices.find(x=>!x.quarantined&&x.lan==='iot-lan');return subnet(d?.ip)||'192.168.20.0/24';})(),icon:'📶'},
+    'Isolated Zone':{devices:devices.filter(d=>d.quarantined),color:'var(--danger)',subnet:(()=>{const d=devices.find(x=>x.quarantined);return subnet(d?.ip)||'192.168.30.0/24';})(),icon:'🔒'},
+    'C-Devices':{devices:devices.filter(d=>d.lan==='c-devices'),color:'var(--accent2)',subnet:(()=>{const d=devices.find(x=>x.lan==='c-devices');return subnet(d?.ip)||'192.168.10.0/24';})(),icon:'💻'},
+  };
   return(
     <div>
       <div className="chart-card">
         <div className="chart-title"><span>Network Topology</span></div>
         <NetworkMap devices={devices}/>
       </div>
+      <WhitelistPanel devices={devices} isAdmin={isAdmin}/>
       {Object.entries(lans).map(([name,{devices:devs,color,subnet:sn,icon}])=>{
         const scores=devs.map(d=>calcScore(d));
         const avg=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
         const isOpen=expanded===name;
         return(
-          <div key={name} className="zone-card"
-            style={{borderLeft:`4px solid ${color}`,cursor:'pointer',userSelect:'none'}}
-            onClick={()=>setExpanded(isOpen?null:name)}>
+          <div key={name} className="zone-card" style={{borderLeft:`4px solid ${color}`,cursor:'pointer',userSelect:'none'}} onClick={()=>setExpanded(isOpen?null:name)}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
               <div>
                 <div style={{fontSize:15,fontWeight:700}}>{icon} {name}</div>
                 <div style={{fontSize:12,color:'var(--muted)',fontFamily:'monospace'}}>{sn}</div>
               </div>
               <div style={{display:'flex',alignItems:'center',gap:10}}>
-                <div style={{background:`${color}22`,color,borderRadius:8,padding:'4px 12px',fontSize:20,fontWeight:800}}>
-                  {devs.length}
-                </div>
-                <span style={{fontSize:11,color:'var(--muted)',transition:'transform 0.2s',
-                  display:'inline-block',transform:isOpen?'rotate(180deg)':'rotate(0deg)'}}>▼</span>
+                <div style={{background:`${color}22`,color,borderRadius:8,padding:'4px 12px',fontSize:20,fontWeight:800}}>{devs.length}</div>
+                <span style={{fontSize:11,color:'var(--muted)',transition:'transform 0.2s',display:'inline-block',transform:isOpen?'rotate(180deg)':'rotate(0deg)'}}>▼</span>
               </div>
             </div>
             {avg!==null&&(
               <div>
                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:4,fontSize:12,color:'var(--muted)'}}>
-                  <span>Average Trust</span>
-                  <span style={{color:scoreColor(avg),fontWeight:700}}>{avg}</span>
+                  <span>Average Trust</span><span style={{color:scoreColor(avg),fontWeight:700}}>{avg}</span>
                 </div>
                 <div style={{height:5,background:'var(--border)',borderRadius:3,overflow:'hidden'}}>
                   <div style={{height:'100%',width:`${avg}%`,background:scoreColor(avg),borderRadius:3,transition:'width 0.5s'}}/>
@@ -823,28 +950,20 @@ function NetworkTab({devices,onSelect}){
             )}
             {devs.length===0&&<div style={{color:'var(--muted)',fontSize:12,marginTop:4}}>No devices in this zone</div>}
             {isOpen&&devs.length>0&&(
-              <div style={{marginTop:12,borderTop:`1px solid ${color}33`,paddingTop:10}}
-                onClick={e=>e.stopPropagation()}>
+              <div style={{marginTop:12,borderTop:`1px solid ${color}33`,paddingTop:10}} onClick={e=>e.stopPropagation()}>
                 {devs.map(d=>{
                   const s=calcScore(d);
                   return(
-                    <div key={d.name}
-                      style={{display:'flex',alignItems:'center',gap:10,padding:'9px 6px',
-                        borderBottom:'1px solid var(--border)',cursor:'pointer',borderRadius:6,
-                        transition:'background 0.12s'}}
+                    <div key={d.name} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 6px',borderBottom:'1px solid var(--border)',cursor:'pointer',borderRadius:6,transition:'background 0.12s'}}
                       onClick={()=>onSelect&&onSelect(d)}
                       onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.04)'}
                       onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                       <span style={{fontSize:20,flexShrink:0}}>{d.icon||'📱'}</span>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,fontWeight:600,
-                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                          {d.friendly_name||d.name}
-                        </div>
+                        <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.friendly_name||d.name}</div>
                         <div style={{fontSize:11,color:'var(--muted)',fontFamily:'monospace'}}>{d.ip}</div>
                       </div>
-                      <span style={{fontSize:13,fontWeight:700,color:scoreColor(s),flexShrink:0,
-                        background:`${scoreColor(s)}18`,padding:'2px 8px',borderRadius:6}}>{s}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:scoreColor(s),flexShrink:0,background:`${scoreColor(s)}18`,padding:'2px 8px',borderRadius:6}}>{s}</span>
                       <span style={{fontSize:11,color:'var(--muted)',flexShrink:0}}>›</span>
                     </div>
                   );
@@ -858,9 +977,22 @@ function NetworkTab({devices,onSelect}){
   );
 }
 
-// ── Main App ──────────────────────────────────────────────────
+function decodeJwtRole(){
+  try{
+    const token=window._zt_token||sessionStorage.getItem('zt_token')||'';
+    if(!token)return'viewer';
+    const payload=token.split('.')[1];
+    const pad=payload.length%4;
+    const b64=payload+(pad?'='.repeat(4-pad):'');
+    const data=JSON.parse(atob(b64.replace(/-/g,'+').replace(/_/g,'/')));
+    return data.role||'viewer';
+  }catch(e){return'viewer';}
+}
+
 function App(){
   const[authed,setAuthed]=useState(false);
+  const[userRole,setUserRole]=useState('viewer');
+  const isAdmin=userRole==='admin';
   const[checking,setChecking]=useState(true);
   const[tab,setTab]=useState('devices');
   const[devices,setDevices]=useState([]);
@@ -869,14 +1001,10 @@ function App(){
   const[selected,setSelected]=useState(null);
   const[fetching,setFetching]=useState(true);
   const[wsOk,setWsOk]=useState(false);
-  // YOUR controller heartbeat state
   const[ctrlOk,setCtrlOk]=useState(null);
   const[lastCycle,setLastCycle]=useState('');
 
-  useEffect(()=>{
-    const saved=sessionStorage.getItem('zt_token');
-    if(saved)window._zt_token=saved;
-  },[]);
+  useEffect(()=>{const saved=sessionStorage.getItem('zt_token');if(saved)window._zt_token=saved;},[]);
 
   useEffect(()=>{
     authFetch(`${API}/api/devices`)
@@ -891,31 +1019,17 @@ function App(){
         authFetch(`${API}/api/devices`).then(r=>r.ok?r.json():null),
         authFetch(`${API}/api/alerts?tail=100`).then(r=>r.ok?r.json():null),
       ]);
-      // YOUR controller heartbeat — marks paused if no cycle in 20s
       try{
         const sr=await authFetch(`${API}/api/status`);
-        if(sr.ok){
-          const sd=await sr.json();
-          const lastTs=sd.last_cycle_at;
-          if(lastTs){
-            const diffSec=(Date.now()-new Date(lastTs).getTime())/1000;
-            setCtrlOk(diffSec<20);
-            setLastCycle(lastTs.slice(11,19));
-          }
-        }
+        if(sr.ok){const sd=await sr.json();const lastTs=sd.last_cycle_at;if(lastTs){const diffSec=(Date.now()-new Date(lastTs).getTime())/1000;setCtrlOk(diffSec<20);setLastCycle(lastTs.slice(11,19));}}
       }catch(e){setCtrlOk(false);}
-      if(dr)setDevices((dr.devices||[]).map(enrich));
+      if(dr){setDevices((dr.devices||[]).map(enrich));setUserRole(decodeJwtRole());}
       if(ar)setAlerts(ar.alerts||[]);
     }catch(e){}
     finally{setFetching(false)}
   },[]);
 
-  useEffect(()=>{
-    if(!authed)return;
-    fetchAll();
-    const t=setInterval(fetchAll,8000);
-    return()=>clearInterval(t);
-  },[authed,fetchAll]);
+  useEffect(()=>{if(!authed)return;fetchAll();const t=setInterval(fetchAll,8000);return()=>clearInterval(t);},[authed,fetchAll]);
 
   useEffect(()=>{
     if(!authed)return;
@@ -937,10 +1051,8 @@ function App(){
 
   const handleAction=async(action,name)=>{
     setLoading(name);
-    try{
-      const r=await authFetch(`${API}/api/${action}/${name}`,{method:'POST'});
-      if(r.ok){setTimeout(fetchAll,1500);setSelected(null)}
-    }catch(e){}
+    try{const r=await authFetch(`${API}/api/${action}/${name}`,{method:'POST'});if(r.ok){setTimeout(fetchAll,1500);setSelected(null)}}
+    catch(e){}
     finally{setLoading(null)}
   };
 
@@ -959,26 +1071,17 @@ function App(){
           <div className="header-icon">🛡</div>
           <div>
             <div className="header-title">ZeroTrust</div>
-            {/* YOUR smart header sub — shows controller pause, live time, or polling */}
             <div className="header-sub" style={{color:ctrlOk===false?'var(--danger)':ctrlOk?'var(--accent2)':'var(--muted)'}}>
-              {ctrlOk===false
-                ?'⏸ Controller Paused'
-                :ctrlOk
-                  ?`● Live${lastCycle?' · '+lastCycle:''}`
-                  :wsOk?'● Live':'○ Polling'
-              }
+              {ctrlOk===false?'⏸ Controller Paused':ctrlOk?`● Live${lastCycle?' · '+lastCycle:''}`:wsOk?'● Live':'○ Polling'}
             </div>
           </div>
         </div>
         <div className={`header-status ${ctrlOk===false?'status-alert':quarCount>0||atRisk>0?'status-alert':'status-secure'}`}>
           <div className={`pulse ${ctrlOk===false?'pulse-red':quarCount>0||atRisk>0?'pulse-red':'pulse-green'}`}/>
-          {ctrlOk===false
-            ?'⏸ PAUSED'
-            :quarCount>0?`${quarCount} Isolated`
-            :atRisk>0?`${atRisk} At Risk`
-            :'Secure'
-          }
+          {ctrlOk===false?'⏸ PAUSED':quarCount>0?`${quarCount} Isolated`:atRisk>0?`${atRisk} At Risk`:'Secure'}
         </div>
+        <button onClick={()=>{window._zt_token='';sessionStorage.removeItem('zt_token');window.location.reload();}}
+          style={{background:'rgba(255,255,255,0.06)',border:'1px solid var(--border)',color:'var(--muted)',borderRadius:8,padding:'6px 12px',fontSize:12,cursor:'pointer',flexShrink:0,marginLeft:8}}>Sign out</button>
       </header>
 
       <div className="content">
@@ -993,7 +1096,7 @@ function App(){
           :tab==='devices'?<DevicesTab devices={devices} onSelect={setSelected}/>
           :tab==='alerts'?<AlertsTab alerts={alerts}/>
           :tab==='charts'?<ChartsTab devices={devices} alerts={alerts}/>
-          :<NetworkTab devices={devices} onSelect={setSelected}/>
+          :<NetworkTab devices={devices} onSelect={setSelected} isAdmin={isAdmin}/>
         }
       </div>
 
@@ -1006,7 +1109,7 @@ function App(){
           <button key={id} className={`nav-item${tab===id?' active':''}`} onClick={()=>setTab(id)} style={{position:'relative'}}>
             <span className="nav-icon">{icon}</span>
             <span className="nav-label">{label}</span>
-            {badge&&<div className="nav-dot"/>}
+            {badge&&tab!==id&&<span className="nav-dot"/>}
           </button>
         ))}
       </nav>

@@ -152,6 +152,7 @@ def main():
     known_devices    = {}
     cycle            = 0
     force_rediscovery = False   # set True after quarantine/restore to trigger immediate rediscovery
+    prev_iot_set     = set()    # track device IPs seen last cycle for join/leave detection
 
     if dh:
         rl.apply_all(dh)
@@ -175,6 +176,76 @@ def main():
         else:
             log(f"Using cached device list ({len(known_devices)} devices)")
 
+        # ── Device join / leave detection ──────────────────────
+        curr_iot_set = {ip for ip in known_devices if ip.startswith(IOT_NET)}
+        joined = curr_iot_set - prev_iot_set
+        left   = prev_iot_set - curr_iot_set
+
+        # Skip join alerts on cycle 1 — all devices appear "new" at startup
+        # Also skip JOIN alert if device was previously quarantined (it's a restore, not new join)
+        # Also batch alerts: if 3+ devices join simultaneously, send one summary
+        if joined and cycle > 1:
+            # Filter out devices that were in quarantine (restores handled by restore_alert)
+            true_joins = {ip for ip in joined
+                          if not any(info.get("last_ip") == ip and info.get("quarantined_before")
+                                     for info in dh.values())}
+            joined = true_joins
+        if joined and cycle > 1:
+            if len(joined) >= 3:
+                # Batch alert for simultaneous joins (e.g. docker compose up)
+                names = []
+                for ip in sorted(joined):
+                    cname = get_container_name(ip)
+                    if not cname or cname == ip: cname = ip
+                    names.append(f"{cname} ({ip})")
+                log(f"BATCH JOIN: {len(joined)} devices joined network", "ALERT")
+                am.send_alert("DEVICE_JOINED", {
+                    "device": f"{len(joined)} devices",
+                    "ip":     ", ".join(sorted(joined)),
+                    "names":  names,
+                    "batch":  True,
+                })
+            else:
+                for ip in joined:
+                    cname = get_container_name(ip)
+                    if not cname or cname == ip:
+                        cname = ip
+                    log(f"NEW DEVICE JOINED: {cname} ({ip})", "ALERT")
+                    am.send_alert("DEVICE_JOINED", {
+                        "device": cname,
+                        "ip":     ip,
+                        "batch":  False,
+                    })
+
+        for ip in left:
+            cname = next((n for n, info in dh.items()
+                          if info.get("last_ip") == ip), ip)
+            # Do NOT fire LEFT alert if device was quarantined —
+            # it moved to quarantine-lan, it didn't truly leave
+            if dh.get(cname, {}).get("quarantined", False):
+                log(f"Device {cname} left IoT LAN → quarantined, no LEFT alert")
+                continue
+            # Also skip if it was just moved to quarantine this cycle
+            # (ew_containers or score-based quarantine sets quarantined=True before we get here)
+            log(f"DEVICE LEFT NETWORK: {cname} ({ip})", "WARN")
+            am.send_alert("DEVICE_LEFT", {
+                "device": cname,
+                "ip":     ip,
+            })
+            # Mark as inactive in history
+            if cname in dh:
+                dh[cname]["active"] = False
+                dh[cname]["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Update active flag for all currently seen devices
+        for ip in curr_iot_set:
+            cname = get_container_name(ip)
+            if cname and cname != ip and cname in dh:
+                dh[cname]["active"] = True
+                dh[cname]["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        prev_iot_set = curr_iot_set
+
         # ── FIX A: build ip→container map once per cycle ──────
         # Used in rate-limit loop; avoids docker inspect subprocess calls
         # that silently fail and cause violations to be skipped.
@@ -195,16 +266,19 @@ def main():
 
         # ── Process scan events ───────────────────────────────
         attacked_devices = set()
+        _attack_quarantine_pending = {}   # attacker_ip → list of quarantined devices
         for attacker_ip, targets in scan_map.items():
             count = len(targets)
             log(f"SCANNING DETECTED: {attacker_ip} contacted "
                 f"{count} IoT devices", "ALERT")
             if attacker_ip.startswith(TRUSTED_NET):
                 log(f"EXTERNAL ATTACKER: {attacker_ip} scanning IoT network!", "ALERT")
-                am.send_alert(am.ALERT_ATTACKER, {
-                    "attacker": attacker_ip,
-                    "targets" : count
-                })
+                # Log only — combined Telegram sent after quarantines are known
+                am._write_log(
+                    f"EXTERNAL_ATTACKER | Attacker: {attacker_ip} | "
+                    f"Targets: {count} IoT devices | Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                _attack_quarantine_pending[attacker_ip] = {"targets": count, "devices": []}
             for dst_ip in targets:
                 if dst_ip.startswith(IOT_NET):
                     attacked_devices.add(dst_ip)
@@ -413,15 +487,74 @@ def main():
             # ── Auto quarantine on low score ──────────────────
             if score < SCORE_THRESHOLD:
                 if not dh[key].get("quarantined", False):
+                    reason_str = f"Trust score {score} | {'; '.join(reasons)}"
                     quarantine_device(
-                        container, ip,
-                        f"Trust score {score} | {'; '.join(reasons)}",
+                        container, ip, reason_str,
                         dh[key].get("device_type", "Unknown IoT Device"),
                         dh, key
                     )
-                    force_rediscovery = True   # pick up new quarantine-lan IP
+                    force_rediscovery = True
+                    # Track for combined attack summary message
+                    for atk_ip in _attack_quarantine_pending:
+                        _attack_quarantine_pending[atk_ip]["devices"].append({
+                            "device": container, "ip": ip, "reason": reason_str
+                        })
 
         # ── End of cycle ──────────────────────────────────────
+        # ── Track trusted (c-devices) in history ─────────────────
+        for _tip, _tinfo in known_devices.items():
+            if not _tip.startswith(TRUSTED_NET):
+                continue
+            _tkey = f"trusted_{_tip.replace('.','_')}"
+            _tnow = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if _tkey not in dh:
+                dh[_tkey] = {
+                    "container"    : _tkey,
+                    "last_ip"      : _tip,
+                    "mac"          : _tinfo.get("mac", "unknown"),
+                    "vendor"       : _tinfo.get("vendor", "Unknown"),
+                    "device_type"  : "Trusted Client",
+                    "open_ports"   : [],
+                    "lan"          : "c-devices",
+                    "trust_score"  : 100,
+                    "score_reasons": [],
+                    "quarantined"  : False,
+                    "active"       : True,
+                    "last_seen"    : _tnow,
+                }
+                log(f"Trusted device added to history: {_tip}")
+            else:
+                dh[_tkey]["last_ip"]   = _tip
+                dh[_tkey]["active"]    = True
+                dh[_tkey]["last_seen"] = _tnow
+
+        # ── Track trusted (c-devices) in history ─────────────────
+        for _tip, _tinfo in known_devices.items():
+            if not _tip.startswith(TRUSTED_NET):
+                continue
+            _tkey = f"trusted_{_tip.replace('.','_')}"
+            _tnow = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if _tkey not in dh:
+                dh[_tkey] = {
+                    "container"    : _tkey,
+                    "last_ip"      : _tip,
+                    "mac"          : _tinfo.get("mac", "unknown"),
+                    "vendor"       : _tinfo.get("vendor", "Unknown"),
+                    "device_type"  : "Trusted Client",
+                    "open_ports"   : [],
+                    "lan"          : "c-devices",
+                    "trust_score"  : 100,
+                    "score_reasons": [],
+                    "quarantined"  : False,
+                    "active"       : True,
+                    "last_seen"    : _tnow,
+                }
+                log(f"Trusted device added to history: {_tip}")
+            else:
+                dh[_tkey]["last_ip"]   = _tip
+                dh[_tkey]["active"]    = True
+                dh[_tkey]["last_seen"] = _tnow
+
         try:
             with open(HEARTBEAT_FILE, "w") as _hb:
                 _hb.write(datetime.now().isoformat())
@@ -429,6 +562,17 @@ def main():
             pass
 
         rl.reset_counters()
+        # ── Send combined attack+quarantine Telegram summary ─────
+        for atk_ip, info in _attack_quarantine_pending.items():
+            # Write alert log entry for dashboard (always)
+            am.send_alert(am.ALERT_ATTACKER, {
+                "attacker": atk_ip,
+                "targets" : info["targets"],
+            })
+            # Send combined Telegram only if there were resulting quarantines
+            if info["devices"]:
+                am.send_attack_summary(atk_ip, info["targets"], info["devices"])
+
         save_history(dh)
         log(f"Cycle {cycle} complete. {len(known_devices)} devices. History saved.")
         log(f"Sleeping {SLEEP_BETWEEN}s...")

@@ -85,16 +85,17 @@ def _safe_compare(a: str, b: str) -> bool:
 def _make_session_token() -> str:
     return secrets.token_urlsafe(32)
 
-def _make_jwt(username: str) -> str:
+def _make_jwt(username: str, role: str = 'admin') -> str:
     """Minimal JWT — header.payload.signature (HS256)."""
     def b64(data: bytes) -> str:
         return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
 
     header  = b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     payload = b64(json.dumps({
-        "sub": username,
-        "iat": int(time.time()),
-        "exp": int(time.time()) + SESSION_TTL,
+        "sub":  username,
+        "role": role,
+        "iat":  int(time.time()),
+        "exp":  int(time.time()) + SESSION_TTL,
     }).encode())
     sig = b64(hmac.new(
         JWT_SECRET.encode(),
@@ -125,7 +126,7 @@ def _verify_jwt(token: str) -> Optional[str]:
         data = json.loads(b64(payload))
         if data.get("exp", 0) < time.time():
             return None
-        return data.get("sub")
+        return data.get("sub"), data.get("role", "viewer")
     except Exception:
         return None
 
@@ -146,11 +147,26 @@ async def login(request: Request) -> JSONResponse:
     user = body.get("username", "")
     pw   = body.get("password", "")
 
-    if not (_safe_compare(user, USERNAME) and _safe_compare(pw, PASSWORD)):
+    # Check admin first
+    admin_ok = _safe_compare(user, USERNAME) and _safe_compare(pw, PASSWORD)
+    # Check viewer users list
+    viewer_ok = False
+    viewer_role = None
+    extra_users = CONFIG.get("users", [])
+    for u in extra_users:
+        if _safe_compare(user, u.get("username","")) and _safe_compare(pw, u.get("password","")):
+            viewer_ok = True
+            viewer_role = u.get("role", "viewer")
+            break
+
+    if not (admin_ok or viewer_ok):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Embed role in JWT payload
+    _user_role = CONFIG.get("role", "admin") if admin_ok else (viewer_role or "viewer")
+
     if AUTH_MODE == "jwt":
-        token = _make_jwt(user)
+        token = _make_jwt(user, _user_role)
         return JSONResponse({"token": token, "type": "Bearer", "expires_in": SESSION_TTL})
 
     elif AUTH_MODE in ("password", "session"):
@@ -226,8 +242,9 @@ async def require_auth(request: Request):
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
-            username = _verify_jwt(token)
-            if username:
+            result = _verify_jwt(token)
+            if result:
+                username, role = result if isinstance(result, tuple) else (result, "admin")
                 return username
         raise HTTPException(
             status_code=401,

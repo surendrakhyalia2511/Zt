@@ -55,9 +55,11 @@ async def read_log_lines(path: str, tail: int = 200):
     except FileNotFoundError:
         return []
 
-def derive_lan(ip: str, quarantined: bool) -> str:
+def derive_lan(ip: str, quarantined: bool, stored_lan: str = "") -> str:
     if quarantined:
         return "quarantine-lan"
+    if stored_lan == "c-devices":
+        return "c-devices"
     if ip.startswith(env("IOT_NET", "192.168.20") + "."):
         return "iot-lan"
     if ip.startswith(env("QUARANTINE_NET", "192.168.30") + "."):
@@ -83,7 +85,7 @@ def normalize_device(name: str, info: dict) -> dict:
     if name == "gateway":
         lan = "c-devices"
     else:
-        lan = derive_lan(ip, quarantined)
+        lan = derive_lan(ip, quarantined, info.get("lan", ""))
 
     return {
         "name":               name,
@@ -109,6 +111,8 @@ def normalize_device(name: str, info: dict) -> dict:
         "score_trend":        info.get("score_trend", "stable"),
         "score_avg":          info.get("score_avg", None),
         "score_history":      info.get("score_history", []),
+        "active":             info.get("active", True),
+        "last_seen":          info.get("last_seen", ""),
     }
 
 # ── Auth routes (public — no require_auth) ────────────────────
@@ -221,11 +225,19 @@ async def quarantine_device(name: str, _=Depends(require_auth)):
             ["bash", QUARANTINE_SH, name, ip],
             capture_output=True, text=True, timeout=15
         )
+        success = result.returncode == 0
+        if success:
+            import alert_manager as am
+            am.send_alert(am.ALERT_QUARANTINE, {
+                "device": name,
+                "ip":     ip,
+                "reason": "Manually isolated via dashboard",
+            })
         return {
             "action":  "quarantine",
             "device":  name,
             "ip":      ip,
-            "success": result.returncode == 0,
+            "success": success,
             "output":  result.stdout.strip(),
             "error":   result.stderr.strip(),
         }
@@ -246,11 +258,18 @@ async def restore_device(name: str, _=Depends(require_auth)):
             ["bash", RESTORE_SH, name, ip],
             capture_output=True, text=True, timeout=15
         )
+        success = result.returncode == 0
+        if success:
+            import alert_manager as am
+            am.send_alert(am.ALERT_RESTORED, {
+                "device": name,
+                "ip":     ip,
+            })
         return {
             "action":  "restore",
             "device":  name,
             "ip":      ip,
-            "success": result.returncode == 0,
+            "success": success,
             "output":  result.stdout.strip(),
             "error":   result.stderr.strip(),
         }
@@ -298,7 +317,8 @@ async def websocket_live(websocket: WebSocket, token: str = ""):
     authenticated = False
 
     if AUTH_MODE == "jwt" and token:
-        if _verify_jwt(token):
+        result = _verify_jwt(token)
+        if result:
             authenticated = True
     elif AUTH_MODE == "apikey" and token:
         if _safe_compare(token, API_KEY):
@@ -332,3 +352,116 @@ async def websocket_live(websocket: WebSocket, token: str = ""):
             await asyncio.sleep(2)
     except WebSocketDisconnect:
         pass
+
+import json as _json
+
+WHITELIST_FILE = os.path.expanduser("~/iot_whitelist.json")
+
+def _load_whitelist():
+    try:
+        if os.path.exists(WHITELIST_FILE):
+            with open(WHITELIST_FILE) as f:
+                return _json.load(f)
+    except Exception:
+        pass
+    return []
+
+def _save_whitelist(rules):
+    with open(WHITELIST_FILE, "w") as f:
+        _json.dump(rules, f, indent=2)
+
+def _require_admin(request: Request):
+    """Stricter check — only admin role can modify whitelist rules."""
+    from auth import AUTH_MODE, _verify_jwt, USERNAME
+    auth_header = request.headers.get("Authorization", "")
+    if AUTH_MODE == "jwt" and auth_header.startswith("Bearer "):
+        result = _verify_jwt(auth_header[7:])
+        username = result[0] if isinstance(result, tuple) else result
+        role = result[1] if isinstance(result, tuple) else "viewer"
+        if username == USERNAME and role == "admin":
+            return username
+    raise HTTPException(status_code=403, detail="Admin role required")
+
+# ── GET /api/whitelist (any authenticated user) ───────────────
+@app.get("/api/whitelist")
+async def get_whitelist(_=Depends(require_auth)):
+    return {"rules": _load_whitelist()}
+
+# ── POST /api/whitelist (admin only) ─────────────────────────
+@app.post("/api/whitelist")
+async def add_whitelist_rule(request: Request, _=Depends(require_auth)):
+    _require_admin(request)
+    body = await request.json()
+    src  = body.get("src", "").strip()
+    dst  = body.get("dst", "").strip()
+    note = body.get("note", "").strip()
+    if not src or not dst:
+        raise HTTPException(status_code=400, detail="src and dst required")
+    rules = _load_whitelist()
+    # Prevent duplicates
+    if any(r["src"] == src and r["dst"] == dst for r in rules):
+        raise HTTPException(status_code=409, detail="Rule already exists")
+    from datetime import datetime as _dt
+    rule = {"src": src, "dst": dst, "note": note,
+            "created": _dt.now().strftime("%Y-%m-%d %H:%M:%S")}
+    rules.append(rule)
+    _save_whitelist(rules)
+    # Resolve container name → current IP and apply iptables rule
+    import subprocess, json as _json2
+    def _name_to_ip(name):
+        try:
+            r = subprocess.run(
+                ["docker","inspect",name,"--format",
+                 "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+                capture_output=True, text=True)
+            ips = [i for i in r.stdout.strip().split() if i.startswith("192.168.20")]
+            return ips[0] if ips else None
+        except Exception:
+            return None
+    src_ip = _name_to_ip(src)
+    dst_ip = _name_to_ip(dst)
+    if src_ip and dst_ip:
+        subprocess.run(
+            ["iptables-nft", "-I", "FORWARD", "1",
+             "-i", "docker-iot", "-o", "docker-iot",
+             "-s", src_ip, "-d", dst_ip, "-j", "ACCEPT"],
+            capture_output=True
+        )
+    import alert_manager as _am
+    _am.send_alert("WHITELIST_ADDED", {"src": src, "dst": dst, "note": note})
+    return {"success": True, "rule": rule}
+
+# ── DELETE /api/whitelist (admin only) ───────────────────────
+@app.delete("/api/whitelist")
+async def delete_whitelist_rule(request: Request, _=Depends(require_auth)):
+    _require_admin(request)
+    body = await request.json()
+    src  = body.get("src", "").strip()
+    dst  = body.get("dst", "").strip()
+    rules = _load_whitelist()
+    new_rules = [r for r in rules if not (r["src"] == src and r["dst"] == dst)]
+    if len(new_rules) == len(rules):
+        raise HTTPException(status_code=404, detail="Rule not found")
+    _save_whitelist(new_rules)
+    # Remove iptables rule — resolve name to IP
+    import subprocess
+    def _n2ip(name):
+        try:
+            r = subprocess.run(
+                ["docker","inspect",name,"--format",
+                 "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+                capture_output=True, text=True)
+            ips = [i for i in r.stdout.strip().split() if i.startswith("192.168.20")]
+            return ips[0] if ips else None
+        except Exception:
+            return None
+    si, di = _n2ip(src), _n2ip(dst)
+    if si and di:
+        subprocess.run(
+            ["iptables-nft", "-D", "FORWARD",
+             "-i", "docker-iot", "-o", "docker-iot",
+             "-s", si, "-d", di, "-j", "ACCEPT"],
+            capture_output=True
+        )
+    return {"success": True}
+
