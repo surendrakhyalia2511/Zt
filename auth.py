@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import base64
 import secrets
+import bcrypt
 from typing import Optional
 
 from fastapi import HTTPException, Request, Depends
@@ -42,6 +43,12 @@ SESSION_TTL = 24 * 3600
 
 
 def _safe_compare(a: str, b: str) -> bool:
+    """Compare plain or bcrypt-hashed passwords safely."""
+    if b.startswith('$2b$') or b.startswith('$2a$'):
+        try:
+            return bcrypt.checkpw(a.encode(), b.encode())
+        except Exception:
+            return False
     return hmac.compare_digest(a.encode(), b.encode())
 
 def _make_jwt(username: str, role: str = "admin") -> str:
@@ -159,3 +166,66 @@ async def require_auth(request: Request):
         del _sessions[cookie]
 
     raise HTTPException(status_code=401, detail="Authentication required")
+
+
+async def change_password(request: Request) -> JSONResponse:
+    """
+    Handle POST /auth/change-password
+    Body: { "current_password": "...", "new_password": "...", "confirm_password": "..." }
+    Requires valid JWT — changes password for the authenticated user only.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    current_pw  = body.get("current_password", "")
+    new_pw      = body.get("new_password", "")
+    confirm_pw  = body.get("confirm_password", "")
+
+    # Validate new password
+    if new_pw != confirm_pw:
+        raise HTTPException(status_code=400, detail="New passwords do not match")
+    if len(new_pw) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if not any(c.isupper() for c in new_pw):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    if not any(c.isdigit() for c in new_pw):
+        raise HTTPException(status_code=400, detail="Password must contain at least one number")
+
+    # Get username from JWT
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    result = _verify_jwt(auth_header[7:])
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    username, role = result if isinstance(result, tuple) else (result, "viewer")
+
+    import json as _j, os as _os
+    with open(AUTH_CONFIG_FILE) as f:
+        cfg = _j.load(f)
+
+    # Check current password and update
+    if username == cfg.get("username"):
+        if not _safe_compare(current_pw, cfg.get("password", "")):
+            raise HTTPException(status_code=403, detail="Current password is incorrect")
+        cfg["password"] = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
+    else:
+        # Viewer user
+        found = False
+        for u in cfg.get("users", []):
+            if u.get("username") == username:
+                if not _safe_compare(current_pw, u.get("password", "")):
+                    raise HTTPException(status_code=403, detail="Current password is incorrect")
+                u["password"] = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt(rounds=12)).decode()
+                found = True
+                break
+        if not found:
+            raise HTTPException(status_code=404, detail="User not found")
+
+    with open(AUTH_CONFIG_FILE, "w") as f:
+        _j.dump(cfg, f, indent=2)
+    _os.chmod(AUTH_CONFIG_FILE, 0o600)
+
+    return JSONResponse({"message": "Password changed successfully"})

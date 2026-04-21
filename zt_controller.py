@@ -258,9 +258,11 @@ def main():
                 dh[ew_container]["east_west"] = True
                 ew_containers.add(ew_container)
                 if not dh[ew_container].get("quarantined", False):
+                    _ew_reason = f"East-west lateral movement to {', '.join(ew_dsts)}"
+                    dh[ew_container]["quarantine_reason"] = _ew_reason
                     quarantine_device(
                         ew_container, ew_src,
-                        f"East-west lateral movement to {', '.join(ew_dsts)}",
+                        _ew_reason,
                         dh[ew_container].get("device_type", "Unknown IoT Device"),
                         dh, ew_container
                     )
@@ -293,7 +295,9 @@ def main():
                     "zone": "EXCEEDED", "penalty": penalty, "message": msg
                 })
                 if not dh.get(d_key, {}).get("quarantined", False):
-                    quarantine_device(d_container, d_ip, f"Rate HARD violation — {msg}",
+                    _rate_reason = f"Rate HARD violation — {msg}"
+                    dh.get(d_key, {})["quarantine_reason"] = _rate_reason
+                    quarantine_device(d_container, d_ip, _rate_reason,
                                       d_type, dh, d_key)
                     force_rediscovery = True
 
@@ -325,6 +329,8 @@ def main():
                     "quarantined_before": False, "quarantined": False,
                     "quarantine_count": 0, "rl_penalty": 0,
                     "rl_applied": ip.startswith(IOT_NET),
+                    "date_joined": now_str,
+                    "quarantine_reason": "",
                 }
             else:
                 dh[key]["last_ip"]     = ip
@@ -368,6 +374,7 @@ def main():
                 if exceeded:
                     log(f"ACTIVE CONN EXCEEDED: {container} ({ip}) — {conn_count}/{conn_limit}", "ALERT")
                     am.send_alert(am.ALERT_QUARANTINE, {"device": container, "ip": ip, "reason": conn_msg})
+                    dh[key]["quarantine_reason"] = conn_msg
                     quarantine_device(container, ip, conn_msg,
                                       dh[key].get("device_type", "Unknown IoT Device"), dh, key)
                     continue

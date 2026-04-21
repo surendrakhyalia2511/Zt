@@ -10,7 +10,7 @@ import os
 import subprocess
 from datetime import datetime
 
-from auth import require_auth, login, logout, _verify_jwt, AUTH_MODE, API_KEY, _safe_compare, USERNAME
+from auth import require_auth, login, logout, change_password, _verify_jwt, AUTH_MODE, API_KEY, _safe_compare, USERNAME
 import alert_manager as am
 import sys
 sys.path.insert(0, os.environ.get('SK_HOME', '/home/sk'))
@@ -99,6 +99,8 @@ def normalize_device(name: str, info: dict) -> dict:
         "score_history":      info.get("score_history", []),
         "active":             info.get("active", True),
         "last_seen":          info.get("last_seen", ""),
+        "date_joined":        info.get("date_joined", ""),
+        "quarantine_reason":  info.get("quarantine_reason", ""),
     }
 
 
@@ -147,6 +149,10 @@ async def do_login(request: Request):
 @app.post("/auth/logout")
 async def do_logout(request: Request):
     return await logout(request)
+
+@app.post("/auth/change-password")
+async def do_change_password(request: Request):
+    return await change_password(request)
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
@@ -235,6 +241,14 @@ async def quarantine_device(name: str, _=Depends(require_auth)):
         if success:
             am.send_alert(am.ALERT_QUARANTINE, {"device": name, "ip": ip,
                                                  "reason": "Manually isolated via dashboard"})
+            try:
+                import json as _jj
+                _dh = _jj.load(open(DEVICE_HISTORY))
+                if name in _dh:
+                    _dh[name]["quarantine_reason"] = "Manually isolated via dashboard"
+                    _jj.dump(_dh, open(DEVICE_HISTORY, "w"), indent=2)
+            except Exception:
+                pass
         return {"action": "quarantine", "device": name, "ip": ip, "success": success,
                 "output": result.stdout.strip(), "error": result.stderr.strip()}
     except subprocess.TimeoutExpired:

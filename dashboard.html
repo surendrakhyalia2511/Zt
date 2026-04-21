@@ -353,7 +353,7 @@ function NetworkMap({devices}){
 }
 
 function LoginScreen({onLogin}){
-  const[user,setUser]=useState('admin');
+  const[user,setUser]=useState('');
   const[pass,setPass]=useState('');
   const[err,setErr]=useState('');
   const[busy,setBusy]=useState(false);
@@ -965,14 +965,16 @@ function DeviceHistoryPanel({devices,onSelect}){
     sel?.type&&{label:'Device Type',val:sel.type,icon:'📡'},
     sel?.ports?.length&&{label:'Open Ports',val:sel.ports.join(', '),icon:'🔌'},
     sel?.connections!=null&&{label:'Active Connections',val:sel.connections,icon:'🔗'},
+    sel?.date_joined&&{label:'First Seen (Joined)',val:sel.date_joined,icon:'📅'},
+    sel?.last_seen&&{label:'Last Seen',val:sel.last_seen,icon:'🕐'},
     sel?.scanning&&{label:'Port Scanning',val:'Detected',icon:'⚠️',danger:true},
-    sel?.east_west&&{label:'East-West Traffic',val:'Detected',icon:'🔀',danger:true},
-    sel?.under_attack&&{label:'Under Attack',val:'Yes',icon:'🚨',danger:true},
-    sel?.rl_penalty>0&&{label:'Rate Penalty',val:`-${sel.rl_penalty} pts`,icon:'📉',warn:true},
+    sel?.east_west&&{label:'East-West Traffic',val:'Detected — lateral movement to IoT device',icon:'🔀',danger:true},
+    sel?.under_attack&&{label:'Under Attack',val:'Active — external attacker targeting this device',icon:'🚨',danger:true},
+    sel?.rl_penalty>0&&{label:'Rate Limit Violation',val:`-${sel.rl_penalty} pts (${sel.rl_penalty>=35?'HARD — quarantine triggered':'SOFT — auto-recovers'})`,icon:'📉',warn:true},
+    sel?.quarantine_reason&&sel?.quarantined&&{label:'Quarantine Reason',val:sel.quarantine_reason,icon:'🔒',danger:true},
     sel?.mac&&{label:'MAC Address',val:sel.mac,icon:'🖧'},
     sel?.vendor&&sel.vendor!=='Unknown'&&{label:'Manufacturer',val:sel.vendor,icon:'🏭'},
-    sel?.violations>0&&{label:'Quarantine Count',val:sel.violations,icon:'🔒',warn:true},
-    sel?.last_seen&&{label:'Last Seen',val:sel.last_seen,icon:'🕐'},
+    sel?.violations>0&&{label:'Quarantine Count',val:sel.violations,icon:'🔢',warn:true},
   ].filter(Boolean);
 
   return(
@@ -1217,6 +1219,10 @@ function App(){
   const[wsOk,setWsOk]=useState(false);
   const[ctrlOk,setCtrlOk]=useState(null);
   const[lastCycle,setLastCycle]=useState('');
+  const[showPwChange,setShowPwChange]=useState(false);
+  const[pwForm,setPwForm]=useState({current:'',newPw:'',confirm:''});
+  const[pwMsg,setPwMsg]=useState('');
+  const[pwBusy,setPwBusy]=useState(false);
 
   useEffect(()=>{const saved=sessionStorage.getItem('zt_token');if(saved)window._zt_token=saved;},[]);
 
@@ -1276,6 +1282,23 @@ function App(){
   const quarCount=devices.filter(d=>d.quarantined).length;
   const atRisk=devices.filter(d=>!d.quarantined&&calcScore(d)<60).length;
   const trusted=devices.length-quarCount-atRisk;
+  const handlePwChange=async()=>{
+    if(pwForm.newPw!==pwForm.confirm){setPwMsg('❌ Passwords do not match');return;}
+    if(pwForm.newPw.length<8){setPwMsg('❌ Min 8 characters');return;}
+    if(!/[A-Z]/.test(pwForm.newPw)){setPwMsg('❌ Need at least one uppercase letter');return;}
+    if(!/[0-9]/.test(pwForm.newPw)){setPwMsg('❌ Need at least one number');return;}
+    setPwBusy(true);setPwMsg('');
+    try{
+      const r=await authFetch(`${API}/auth/change-password`,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({current_password:pwForm.current,new_password:pwForm.newPw,confirm_password:pwForm.confirm})
+      });
+      const d=await r.json();
+      if(r.ok){setPwMsg('✅ '+d.message);setTimeout(()=>setShowPwChange(false),1500);}
+      else setPwMsg('❌ '+(d.detail||'Failed'));
+    }catch(e){setPwMsg('❌ Connection failed');}
+    finally{setPwBusy(false);}
+  };
 
   return(
     <div className="app">
@@ -1293,8 +1316,42 @@ function App(){
           <div className={`pulse ${ctrlOk===false?'pulse-red':quarCount>0||atRisk>0?'pulse-red':'pulse-green'}`}/>
           {ctrlOk===false?'⏸ PAUSED':quarCount>0?`${quarCount} Isolated`:atRisk>0?`${atRisk} At Risk`:'Secure'}
         </div>
-        <button onClick={()=>{window._zt_token='';sessionStorage.removeItem('zt_token');window.location.reload();}}
-          style={{background:'rgba(255,255,255,0.06)',border:'1px solid var(--border)',color:'var(--muted)',borderRadius:8,padding:'6px 12px',fontSize:12,cursor:'pointer',flexShrink:0,marginLeft:8}}>Sign out</button>
+        <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0,marginLeft:8}}>
+          <button onClick={()=>{setPwForm({current:'',newPw:'',confirm:''});setPwMsg('');setShowPwChange(true);}}
+            style={{background:'rgba(255,255,255,0.04)',border:'1px solid var(--border)',color:'var(--muted)',borderRadius:8,padding:'5px 10px',fontSize:11,cursor:'pointer'}}>
+            🔑 Change PW
+          </button>
+          <button onClick={()=>{window._zt_token='';sessionStorage.removeItem('zt_token');window.location.reload();}}
+            style={{background:'rgba(255,255,255,0.06)',border:'1px solid var(--border)',color:'var(--muted)',borderRadius:8,padding:'5px 10px',fontSize:11,cursor:'pointer'}}>
+            Sign out
+          </button>
+        </div>
+        {showPwChange&&(
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center'}}
+               onClick={e=>e.target===e.currentTarget&&setShowPwChange(false)}>
+            <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:16,padding:28,width:320,maxWidth:'90vw'}}>
+              <div style={{fontSize:16,fontWeight:700,marginBottom:16,color:'var(--text)'}}>🔑 Change Password</div>
+              {[['Current password','current','password'],['New password','newPw','password'],['Confirm new password','confirm','password']].map(([lbl,key,type])=>(
+                <div key={key} style={{marginBottom:10}}>
+                  <div style={{fontSize:11,color:'var(--muted)',marginBottom:4}}>{lbl}</div>
+                  <input type={type} value={pwForm[key]}
+                    onChange={e=>setPwForm(p=>({...p,[key]:e.target.value}))}
+                    style={{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px',fontSize:14,color:'var(--text)',outline:'none',boxSizing:'border-box'}}/>
+                </div>
+              ))}
+              <div style={{fontSize:10,color:'var(--muted)',marginBottom:12}}>Min 8 chars · 1 uppercase · 1 number</div>
+              {pwMsg&&<div style={{fontSize:12,marginBottom:10,color:pwMsg.startsWith('✅')?'var(--accent2)':'var(--danger)'}}>{pwMsg}</div>}
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={handlePwChange} disabled={pwBusy} style={{flex:1,background:'var(--accent)',color:'#000',border:'none',borderRadius:8,padding:'10px',fontSize:14,fontWeight:700,cursor:'pointer'}}>
+                  {pwBusy?'Saving...':'Save'}
+                </button>
+                <button onClick={()=>setShowPwChange(false)} style={{flex:1,background:'rgba(255,255,255,0.05)',border:'1px solid var(--border)',color:'var(--text)',borderRadius:8,padding:'10px',fontSize:14,cursor:'pointer'}}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       <div className="content">
