@@ -10,34 +10,31 @@ import os
 import subprocess
 from datetime import datetime
 
-from auth import require_auth, login, logout
+from auth import require_auth, login, logout, _verify_jwt, AUTH_MODE, API_KEY, _safe_compare, USERNAME
+import alert_manager as am
 import sys
 sys.path.insert(0, os.environ.get('SK_HOME', '/home/sk'))
 from env_loader import env
 
 app = FastAPI(title="ZeroTrust Gateway Dashboard API", version="1.0.0")
 
-# ── Middleware first ─────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://192.168.35.136", "https://localhost", "http://localhost"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
-# ── Static files (secure dir — web assets only) ───────────────
 app.mount("/static", StaticFiles(directory=env("STATIC_DIR", "/home/sk/static_web")), name="static")
 
-# ── File Paths ───────────────────────────────────────────────
 DEVICE_HISTORY = env("DEVICE_HISTORY", os.path.expanduser("~/device_history.json"))
-ALERTS_LOG     = env("ALERT_LOG",     "/var/log/zt-alerts.log")
-RATELIMIT_LOG  = env("RATELIMIT_LOG", "/var/log/zt-ratelimit.log")
+ALERTS_LOG     = env("ALERT_LOG",      "/var/log/zt-alerts.log")
+RATELIMIT_LOG  = env("RATELIMIT_LOG",  "/var/log/zt-ratelimit.log")
 QUARANTINE_SH  = os.path.expanduser("~/quarantine_device.sh")
 RESTORE_SH     = os.path.expanduser("~/restore_device.sh")
 HEARTBEAT_FILE = env("HEARTBEAT_FILE", "/var/run/zt-heartbeat")
+WHITELIST_FILE = os.path.expanduser("~/iot_whitelist.json")
 
-# ── Helpers ──────────────────────────────────────────────────
+
 async def read_json(path: str):
     try:
         async with aiofiles.open(path, "r") as f:
@@ -47,6 +44,7 @@ async def read_json(path: str):
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail=f"Invalid JSON: {path}")
 
+
 async def read_log_lines(path: str, tail: int = 200):
     try:
         async with aiofiles.open(path, "r") as f:
@@ -55,38 +53,27 @@ async def read_log_lines(path: str, tail: int = 200):
     except FileNotFoundError:
         return []
 
+
 def derive_lan(ip: str, quarantined: bool, stored_lan: str = "") -> str:
-    if quarantined:
-        return "quarantine-lan"
-    if stored_lan == "c-devices":
-        return "c-devices"
-    if ip.startswith(env("IOT_NET", "192.168.20") + "."):
-        return "iot-lan"
-    if ip.startswith(env("QUARANTINE_NET", "192.168.30") + "."):
-        return "quarantine-lan"
-    if ip.startswith(env("TRUSTED_NET", "192.168.10") + "."):
-        return "c-devices"
+    if quarantined:              return "quarantine-lan"
+    if stored_lan == "c-devices": return "c-devices"
+    if ip.startswith(env("IOT_NET",        "192.168.20") + "."): return "iot-lan"
+    if ip.startswith(env("QUARANTINE_NET", "192.168.30") + "."): return "quarantine-lan"
+    if ip.startswith(env("TRUSTED_NET",    "192.168.10") + "."): return "c-devices"
     return "iot-lan"
 
+
 def derive_status(info: dict) -> str:
-    if info.get("quarantined"):
-        return "quarantined"
-    if info.get("under_attack"):
-        return "under_attack"
-    if info.get("scanning"):
-        return "scanning"
+    if info.get("quarantined"):   return "quarantined"
+    if info.get("under_attack"):  return "under_attack"
+    if info.get("scanning"):      return "scanning"
     return "active"
+
 
 def normalize_device(name: str, info: dict) -> dict:
     ip          = info.get("last_ip", "unknown")
     quarantined = info.get("quarantined", False)
-
-    # ✅ FIX: force gateway into c-devices
-    if name == "gateway":
-        lan = "c-devices"
-    else:
-        lan = derive_lan(ip, quarantined, info.get("lan", ""))
-
+    lan = "c-devices" if name == "gateway" else derive_lan(ip, quarantined, info.get("lan", ""))
     return {
         "name":               name,
         "ip":                 ip,
@@ -97,7 +84,6 @@ def normalize_device(name: str, info: dict) -> dict:
         "trust_score":        info.get("trust_score", info.get("score", None)),
         "status":             derive_status(info),
         "ports":              info.get("open_ports", []),
-        "last_seen":          info.get("last_seen", "unknown"),
         "violations":         info.get("quarantine_count", 0),
         "quarantined":        quarantined,
         "quarantined_before": info.get("quarantined_before", False),
@@ -115,7 +101,45 @@ def normalize_device(name: str, info: dict) -> dict:
         "last_seen":          info.get("last_seen", ""),
     }
 
-# ── Auth routes (public — no require_auth) ────────────────────
+
+def _load_whitelist():
+    try:
+        if os.path.exists(WHITELIST_FILE):
+            with open(WHITELIST_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+
+def _save_whitelist(rules):
+    with open(WHITELIST_FILE, "w") as f:
+        json.dump(rules, f, indent=2)
+
+
+def _require_admin(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    if AUTH_MODE == "jwt" and auth_header.startswith("Bearer "):
+        result   = _verify_jwt(auth_header[7:])
+        username = result[0] if isinstance(result, tuple) else result
+        role     = result[1] if isinstance(result, tuple) else "viewer"
+        if username == USERNAME and role == "admin":
+            return username
+    raise HTTPException(status_code=403, detail="Admin role required")
+
+
+def _name_to_ip(name):
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", name, "--format",
+             "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+            capture_output=True, text=True)
+        ips = [i for i in r.stdout.strip().split() if i.startswith("192.168.20")]
+        return ips[0] if ips else None
+    except Exception:
+        return None
+
+
 @app.post("/auth/login")
 async def do_login(request: Request):
     return await login(request)
@@ -124,35 +148,27 @@ async def do_login(request: Request):
 async def do_logout(request: Request):
     return await logout(request)
 
-# ── Dashboard (public — serves HTML) ─────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
     async with aiofiles.open(env("DASHBOARD_HTML", "/home/sk/dashboard.html"), "r") as f:
         return await f.read()
 
-# ── PWA routes (public) ───────────────────────────────────────
 @app.get("/manifest.json")
 async def manifest():
-    return FileResponse(
-        os.path.join(env("STATIC_DIR", "/home/sk/static_web"), "manifest.json"),
-        media_type="application/manifest+json"
-    )
+    return FileResponse(os.path.join(env("STATIC_DIR", "/home/sk/static_web"), "manifest.json"),
+                        media_type="application/manifest+json")
 
 @app.get("/sw.js")
 async def service_worker():
-    return FileResponse(
-        os.path.join(env("STATIC_DIR", "/home/sk/static_web"), "sw.js"),
-        media_type="application/javascript"
-    )
+    return FileResponse(os.path.join(env("STATIC_DIR", "/home/sk/static_web"), "sw.js"),
+                        media_type="application/javascript")
 
-# ── GET /api/devices (protected) ─────────────────────────────
 @app.get("/api/devices")
 async def get_devices(_=Depends(require_auth)):
     data    = await read_json(DEVICE_HISTORY)
     devices = [normalize_device(name, info) for name, info in data.items()]
     return {"total": len(devices), "devices": devices}
 
-# ── GET /api/lans (protected) ─────────────────────────────────
 @app.get("/api/lans")
 async def get_lans(_=Depends(require_auth)):
     data = await read_json(DEVICE_HISTORY)
@@ -164,19 +180,14 @@ async def get_lans(_=Depends(require_auth)):
             lans[lan] = {"name": lan, "device_count": 0, "devices": [], "avg_trust": 0}
         lans[lan]["device_count"] += 1
         lans[lan]["devices"].append({
-            "name":        device["name"],
-            "ip":          device["ip"],
-            "type":        device["type"],
-            "trust_score": device["trust_score"],
-            "status":      device["status"],
+            "name": device["name"], "ip": device["ip"],
+            "type": device["type"], "trust_score": device["trust_score"], "status": device["status"],
         })
     for lan in lans.values():
-        scores = [d["trust_score"] for d in lan["devices"]
-                  if isinstance(d["trust_score"], (int, float))]
+        scores = [d["trust_score"] for d in lan["devices"] if isinstance(d["trust_score"], (int, float))]
         lan["avg_trust"] = round(sum(scores) / len(scores), 1) if scores else None
     return {"lans": list(lans.values())}
 
-# ── GET /api/alerts (protected) ───────────────────────────────
 @app.get("/api/alerts")
 async def get_alerts(tail: int = 100, _=Depends(require_auth)):
     lines  = await read_log_lines(ALERTS_LOG, tail)
@@ -190,28 +201,25 @@ async def get_alerts(tail: int = 100, _=Depends(require_auth)):
         })
     return {"total": len(alerts), "alerts": list(reversed(alerts))}
 
-# ── GET /api/traffic (protected) ──────────────────────────────
 @app.get("/api/traffic")
 async def get_traffic(tail: int = 200, _=Depends(require_auth)):
     lines   = await read_log_lines(RATELIMIT_LOG, tail)
+    iot_pfx = env("IOT_NET", "192.168.20") + "."
+    tru_pfx = env("TRUSTED_NET", "192.168.10") + "."
     entries = []
     for line in lines:
         parts = line.split(" ", 2)
         ip    = "unknown"
         msg   = parts[2] if len(parts) >= 3 else line
         for segment in msg.split():
-            if segment.startswith(env("IOT_NET", "192.168.20") + ".") or segment.startswith(env("TRUSTED_NET", "192.168.10") + "."):
-                ip = segment
-                break
+            if segment.startswith(iot_pfx) or segment.startswith(tru_pfx):
+                ip = segment; break
         entries.append({
-            "raw":       line,
-            "timestamp": f"{parts[0]} {parts[1]}" if len(parts) >= 2 else "",
-            "message":   msg,
-            "ip":        ip,
+            "raw": line, "timestamp": f"{parts[0]} {parts[1]}" if len(parts) >= 2 else "",
+            "message": msg, "ip": ip,
         })
     return {"total": len(entries), "traffic": list(reversed(entries))}
 
-# ── POST /api/quarantine/{name} (protected) ───────────────────
 @app.post("/api/quarantine/{name}")
 async def quarantine_device(name: str, _=Depends(require_auth)):
     data = await read_json(DEVICE_HISTORY)
@@ -221,30 +229,17 @@ async def quarantine_device(name: str, _=Depends(require_auth)):
     if not ip:
         raise HTTPException(status_code=400, detail="Device has no IP")
     try:
-        result = subprocess.run(
-            ["bash", QUARANTINE_SH, name, ip],
-            capture_output=True, text=True, timeout=15
-        )
+        result  = subprocess.run(["bash", QUARANTINE_SH, name, ip],
+                                 capture_output=True, text=True, timeout=15)
         success = result.returncode == 0
         if success:
-            import alert_manager as am
-            am.send_alert(am.ALERT_QUARANTINE, {
-                "device": name,
-                "ip":     ip,
-                "reason": "Manually isolated via dashboard",
-            })
-        return {
-            "action":  "quarantine",
-            "device":  name,
-            "ip":      ip,
-            "success": success,
-            "output":  result.stdout.strip(),
-            "error":   result.stderr.strip(),
-        }
+            am.send_alert(am.ALERT_QUARANTINE, {"device": name, "ip": ip,
+                                                 "reason": "Manually isolated via dashboard"})
+        return {"action": "quarantine", "device": name, "ip": ip, "success": success,
+                "output": result.stdout.strip(), "error": result.stderr.strip()}
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Script timed out")
 
-# ── POST /api/restore/{name} (protected) ──────────────────────
 @app.post("/api/restore/{name}")
 async def restore_device(name: str, _=Depends(require_auth)):
     data = await read_json(DEVICE_HISTORY)
@@ -254,50 +249,33 @@ async def restore_device(name: str, _=Depends(require_auth)):
     if not ip:
         raise HTTPException(status_code=400, detail="Device has no IP")
     try:
-        result = subprocess.run(
-            ["bash", RESTORE_SH, name, ip],
-            capture_output=True, text=True, timeout=15
-        )
+        result  = subprocess.run(["bash", RESTORE_SH, name, ip],
+                                 capture_output=True, text=True, timeout=15)
         success = result.returncode == 0
         if success:
-            import alert_manager as am
-            am.send_alert(am.ALERT_RESTORED, {
-                "device": name,
-                "ip":     ip,
-            })
-        return {
-            "action":  "restore",
-            "device":  name,
-            "ip":      ip,
-            "success": success,
-            "output":  result.stdout.strip(),
-            "error":   result.stderr.strip(),
-        }
+            am.send_alert(am.ALERT_RESTORED, {"device": name, "ip": ip})
+        return {"action": "restore", "device": name, "ip": ip, "success": success,
+                "output": result.stdout.strip(), "error": result.stderr.strip()}
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Script timed out")
 
-def _read_heartbeat():
-    """Read last controller cycle timestamp from heartbeat file."""
-    try:
-        HEARTBEAT_FILE = env("HEARTBEAT_FILE", "/var/run/zt-heartbeat")
-        if os.path.exists(HEARTBEAT_FILE):
-            with open(HEARTBEAT_FILE) as f:
-                return f.read().strip()
-    except Exception:
-        pass
-    return None
-
-# ── GET /api/status (protected — quick health check) ──────────
 @app.get("/api/status")
 async def get_status(_=Depends(require_auth)):
-    data = await read_json(DEVICE_HISTORY)
-    total     = len(data)
-    quarantined = sum(1 for d in data.values() if d.get("quarantined"))
+    data         = await read_json(DEVICE_HISTORY)
+    total        = len(data)
+    quarantined  = sum(1 for d in data.values() if d.get("quarantined"))
     alerts_today = 0
     try:
-        lines = await read_log_lines(ALERTS_LOG, 500)
-        today = datetime.now().strftime("%Y-%m-%d")
+        lines        = await read_log_lines(ALERTS_LOG, 500)
+        today        = datetime.now().strftime("%Y-%m-%d")
         alerts_today = sum(1 for l in lines if l.startswith(today))
+    except Exception:
+        pass
+    last_cycle = None
+    try:
+        if os.path.exists(HEARTBEAT_FILE):
+            with open(HEARTBEAT_FILE) as f:
+                last_cycle = f.read().strip()
     except Exception:
         pass
     return {
@@ -306,31 +284,21 @@ async def get_status(_=Depends(require_auth)):
         "trusted":         total - quarantined,
         "alerts_today":    alerts_today,
         "controller_time": datetime.now().isoformat(),
-        "last_cycle_at":   _read_heartbeat(),
+        "last_cycle_at":   last_cycle,
     }
 
-# ── WebSocket /ws/live (auth via token param) ─────────────────
 @app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket, token: str = ""):
-    # Validate JWT token passed as query param for WebSocket
-    from auth import _verify_jwt, AUTH_MODE, API_KEY, _safe_compare
     authenticated = False
-
     if AUTH_MODE == "jwt" and token:
-        result = _verify_jwt(token)
-        if result:
-            authenticated = True
+        authenticated = bool(_verify_jwt(token))
     elif AUTH_MODE == "apikey" and token:
-        if _safe_compare(token, API_KEY):
-            authenticated = True
+        authenticated = _safe_compare(token, API_KEY)
     else:
-        # Allow in password/session mode — dashboard handles auth
         authenticated = True
-
     if not authenticated:
         await websocket.close(code=4001)
         return
-
     await websocket.accept()
     try:
         last_size = 0
@@ -343,9 +311,9 @@ async def websocket_live(websocket: WebSocket, token: str = ""):
                         lines = await read_log_lines(ALERTS_LOG, 5)
                         for line in lines:
                             await websocket.send_json({
-                                "type":      "alert",
+                                "type": "alert",
                                 "timestamp": datetime.now().isoformat(),
-                                "message":   line,
+                                "message": line,
                             })
             except Exception:
                 pass
@@ -353,41 +321,10 @@ async def websocket_live(websocket: WebSocket, token: str = ""):
     except WebSocketDisconnect:
         pass
 
-import json as _json
-
-WHITELIST_FILE = os.path.expanduser("~/iot_whitelist.json")
-
-def _load_whitelist():
-    try:
-        if os.path.exists(WHITELIST_FILE):
-            with open(WHITELIST_FILE) as f:
-                return _json.load(f)
-    except Exception:
-        pass
-    return []
-
-def _save_whitelist(rules):
-    with open(WHITELIST_FILE, "w") as f:
-        _json.dump(rules, f, indent=2)
-
-def _require_admin(request: Request):
-    """Stricter check — only admin role can modify whitelist rules."""
-    from auth import AUTH_MODE, _verify_jwt, USERNAME
-    auth_header = request.headers.get("Authorization", "")
-    if AUTH_MODE == "jwt" and auth_header.startswith("Bearer "):
-        result = _verify_jwt(auth_header[7:])
-        username = result[0] if isinstance(result, tuple) else result
-        role = result[1] if isinstance(result, tuple) else "viewer"
-        if username == USERNAME and role == "admin":
-            return username
-    raise HTTPException(status_code=403, detail="Admin role required")
-
-# ── GET /api/whitelist (any authenticated user) ───────────────
 @app.get("/api/whitelist")
 async def get_whitelist(_=Depends(require_auth)):
     return {"rules": _load_whitelist()}
 
-# ── POST /api/whitelist (admin only) ─────────────────────────
 @app.post("/api/whitelist")
 async def add_whitelist_rule(request: Request, _=Depends(require_auth)):
     _require_admin(request)
@@ -398,70 +335,36 @@ async def add_whitelist_rule(request: Request, _=Depends(require_auth)):
     if not src or not dst:
         raise HTTPException(status_code=400, detail="src and dst required")
     rules = _load_whitelist()
-    # Prevent duplicates
     if any(r["src"] == src and r["dst"] == dst for r in rules):
         raise HTTPException(status_code=409, detail="Rule already exists")
-    from datetime import datetime as _dt
     rule = {"src": src, "dst": dst, "note": note,
-            "created": _dt.now().strftime("%Y-%m-%d %H:%M:%S")}
+            "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
     rules.append(rule)
     _save_whitelist(rules)
-    # Resolve container name → current IP and apply iptables rule
-    import subprocess, json as _json2
-    def _name_to_ip(name):
-        try:
-            r = subprocess.run(
-                ["docker","inspect",name,"--format",
-                 "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
-                capture_output=True, text=True)
-            ips = [i for i in r.stdout.strip().split() if i.startswith("192.168.20")]
-            return ips[0] if ips else None
-        except Exception:
-            return None
-    src_ip = _name_to_ip(src)
-    dst_ip = _name_to_ip(dst)
+    src_ip, dst_ip = _name_to_ip(src), _name_to_ip(dst)
     if src_ip and dst_ip:
-        subprocess.run(
-            ["iptables-nft", "-I", "FORWARD", "1",
-             "-i", "docker-iot", "-o", "docker-iot",
-             "-s", src_ip, "-d", dst_ip, "-j", "ACCEPT"],
-            capture_output=True
-        )
-    import alert_manager as _am
-    _am.send_alert("WHITELIST_ADDED", {"src": src, "dst": dst, "note": note})
+        subprocess.run(["iptables-nft", "-I", "FORWARD", "1",
+                        "-i", "docker-iot", "-o", "docker-iot",
+                        "-s", src_ip, "-d", dst_ip, "-j", "ACCEPT"],
+                       capture_output=True)
+    am.send_alert("WHITELIST_ADDED", {"src": src, "dst": dst, "note": note})
     return {"success": True, "rule": rule}
 
-# ── DELETE /api/whitelist (admin only) ───────────────────────
 @app.delete("/api/whitelist")
 async def delete_whitelist_rule(request: Request, _=Depends(require_auth)):
     _require_admin(request)
-    body = await request.json()
-    src  = body.get("src", "").strip()
-    dst  = body.get("dst", "").strip()
-    rules = _load_whitelist()
+    body      = await request.json()
+    src       = body.get("src", "").strip()
+    dst       = body.get("dst", "").strip()
+    rules     = _load_whitelist()
     new_rules = [r for r in rules if not (r["src"] == src and r["dst"] == dst)]
     if len(new_rules) == len(rules):
         raise HTTPException(status_code=404, detail="Rule not found")
     _save_whitelist(new_rules)
-    # Remove iptables rule — resolve name to IP
-    import subprocess
-    def _n2ip(name):
-        try:
-            r = subprocess.run(
-                ["docker","inspect",name,"--format",
-                 "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
-                capture_output=True, text=True)
-            ips = [i for i in r.stdout.strip().split() if i.startswith("192.168.20")]
-            return ips[0] if ips else None
-        except Exception:
-            return None
-    si, di = _n2ip(src), _n2ip(dst)
+    si, di = _name_to_ip(src), _name_to_ip(dst)
     if si and di:
-        subprocess.run(
-            ["iptables-nft", "-D", "FORWARD",
-             "-i", "docker-iot", "-o", "docker-iot",
-             "-s", si, "-d", di, "-j", "ACCEPT"],
-            capture_output=True
-        )
+        subprocess.run(["iptables-nft", "-D", "FORWARD",
+                        "-i", "docker-iot", "-o", "docker-iot",
+                        "-s", si, "-d", di, "-j", "ACCEPT"],
+                       capture_output=True)
     return {"success": True}
-

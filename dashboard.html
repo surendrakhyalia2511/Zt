@@ -723,123 +723,162 @@ function GroupedAttackerAlert({alerts,allAlerts}){
 }
 
 function AlertsTab({alerts}){
-  if(!alerts.length)return(<div className="empty"><div className="empty-icon">✅</div>No alerts — network is clean</div>);
-  const attackerAlerts=alerts.filter(a=>{const r=a.raw||a.message||'';return r.includes('EXTERNAL_ATTACKER')||r.includes('ATTACKER DETECTED');});
-  const joinAlerts=alerts.filter(a=>(a.raw||a.message||'').includes('NEW DEVICE ON NETWORK'));
-  const attackWindows=attackerAlerts.map(a=>a.timestamp?new Date(a.timestamp).getTime():0).filter(Boolean);
+  const[joinExp,setJoinExp]=React.useState({});
+  const[restExp,setRestExp]=React.useState({});
+
+  if(!alerts.length)return(
+    <div className="empty"><div className="empty-icon">✅</div>No alerts — network is clean</div>
+  );
+
+  // Separate types
+  const attackerAlerts=alerts.filter(a=>{
+    const r=a.raw||a.message||'';
+    return r.includes('EXTERNAL_ATTACKER')||r.includes('ATTACKER DETECTED');
+  });
+  const attackMs=attackerAlerts.map(a=>a.timestamp?new Date(a.timestamp).getTime():0).filter(Boolean);
   const isRelatedQuar=(a)=>{
     const r=a.raw||a.message||'';
     if(!r.includes('QUARANTINED'))return false;
-    const aMs=a.timestamp?new Date(a.timestamp).getTime():0;
-    return attackWindows.some(t=>Math.abs(aMs-t)<90000);
+    const t=a.timestamp?new Date(a.timestamp).getTime():0;
+    return attackMs.some(at=>Math.abs(t-at)<90000);
   };
+  const joinAlerts=alerts.filter(a=>(a.raw||a.message||'').includes('NEW DEVICE ON NETWORK'));
+  const restAlerts=alerts.filter(a=>(a.raw||a.message||'').includes('DEVICE RESTORED'));
   const otherAlerts=alerts.filter(a=>{
     const r=a.raw||a.message||'';
-    return !r.includes('EXTERNAL_ATTACKER')&&!r.includes('ATTACKER DETECTED')&&!r.includes('NEW DEVICE ON NETWORK')&&!isRelatedQuar(a);
+    return !r.includes('EXTERNAL_ATTACKER')&&!r.includes('ATTACKER DETECTED')
+           &&!r.includes('NEW DEVICE ON NETWORK')
+           &&!r.includes('DEVICE RESTORED')
+           &&!isRelatedQuar(a);
   });
+
+  // Group joins by minute
   const joinGroups={};
   joinAlerts.forEach(a=>{
     const min=(a.timestamp||'').slice(0,16);
-    if(!joinGroups[min])joinGroups[min]={time:a.timestamp,alerts:[],devices:[]};
-    joinGroups[min].alerts.push(a);
-    const devMatch=(a.raw||'').match(/Device\s*:\s*(\S+)/i);
-    const ipMatch=(a.raw||'').match(/IP\s*:\s*([\d.]+)/i);
-    if(devMatch)joinGroups[min].devices.push({name:devMatch[1],ip:ipMatch?ipMatch[1]:''});
+    if(!joinGroups[min])joinGroups[min]={time:a.timestamp,devices:[]};
+    const devM=(a.raw||'').match(/Device\s*:\s*(\S+)/i);
+    const ipM=(a.raw||'').match(/IP\s*:\s*([\d.]+)/i);
+    if(devM)joinGroups[min].devices.push({name:devM[1],ip:ipM?ipM[1]:''});
   });
-  const [joinExp,setJoinExp]=React.useState({});
-  const toggleJoin=k=>setJoinExp(p=>({...p,[k]:!p[k]}));
-  const allGroupItems=[
+
+  // Group restores by minute
+  const restGroups={};
+  restAlerts.forEach(a=>{
+    const min=(a.timestamp||'').slice(0,16);
+    if(!restGroups[min])restGroups[min]={time:a.timestamp,devices:[]};
+    const devM=(a.raw||'').match(/Device\s*:\s*(\S+)/i);
+    const ipM=(a.raw||'').match(/IP\s*:\s*([\d.]+)/i);
+    if(devM)restGroups[min].devices.push({name:devM[1],ip:ipM?ipM[1]:''});
+  });
+
+  // ALL types in ONE time-sorted list
+  const allItems=[
     ...attackerAlerts.map(a=>({type:'atk',a,ts:a.timestamp||''})),
     ...Object.values(joinGroups).map(g=>({type:'join',g,ts:g.time||''})),
-  ].sort((x,y)=>y.ts.localeCompare(x.ts));
+    ...Object.values(restGroups).map(g=>({type:'restore',g,ts:g.time||''})),
+    ...otherAlerts.map(a=>({type:'other',a,ts:a.timestamp||''})),
+  ].sort((x,y)=>(y.ts||'').localeCompare(x.ts||''));
+
+  const _ls=sessionStorage.getItem('zt_alerts_seen')||'';
+  const _uc=alerts.filter(a=>(a.timestamp||'')>_ls).length;
+
   return(
     <div className="alert-list">
-      {allGroupItems.map((item,idx)=>{
-        if(item.type==='atk')return(<GroupedAttackerAlert key={'atk'+idx} alerts={[item.a]} allAlerts={alerts}/>);
-        const g=item.g;
-        const min=Object.keys(joinGroups).find(k=>joinGroups[k]===g)||idx;
-        return(
-          <div key={min} className="alert-card alert-join" style={{marginBottom:8}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:g.devices.length>1?'pointer':'default'}} onClick={()=>g.devices.length>1&&toggleJoin(min)}>
-              <div>
-                <span style={{fontSize:12,fontWeight:700,color:'var(--accent2)'}}>🟢 {g.devices.length>1?`${g.devices.length} NEW DEVICES JOINED`:'NEW DEVICE JOINED'}</span>
-                <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{g.time}</div>
+      {_uc>0&&(
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+          marginBottom:8,padding:'8px 12px',background:'rgba(255,59,92,0.06)',
+          borderRadius:8,border:'1px solid rgba(255,59,92,0.15)'}}>
+          <span style={{fontSize:12,color:'var(--muted)'}}>{_uc} unread alert{_uc>1?'s':''}</span>
+          <button onClick={()=>{
+            sessionStorage.setItem('zt_alerts_seen',alerts[0]?.timestamp||new Date().toISOString().slice(0,19).replace('T',' '));
+            window.dispatchEvent(new Event('storage'));
+          }} style={{background:'transparent',border:'1px solid var(--border)',color:'var(--muted)',
+            borderRadius:6,padding:'4px 10px',fontSize:11,cursor:'pointer'}}>✓ Mark all read</button>
+        </div>
+      )}
+      {allItems.slice(0,80).map((item,i)=>{
+        if(item.type==='atk')return(
+          <GroupedAttackerAlert key={'atk'+i} alerts={[item.a]} allAlerts={alerts}/>
+        );
+        if(item.type==='join'){
+          const g=item.g;
+          const min=(g.time||'').slice(0,16);
+          const single=g.devices.length===1;
+          return(
+            <div key={'j'+i} className="alert-card alert-join" style={{marginBottom:8}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+                cursor:single?'default':'pointer'}}
+                onClick={()=>!single&&setJoinExp(p=>({...p,[min]:!p[min]}))}>
+                <div>
+                  <span style={{fontSize:12,fontWeight:700,color:'var(--accent2)'}}>
+                    🟢 {single?'NEW DEVICE JOINED':`${g.devices.length} NEW DEVICES JOINED`}
+                  </span>
+                  <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{g.time}</div>
+                </div>
+                {!single&&<span style={{fontSize:14,color:'var(--muted)'}}>{joinExp[min]?'▲':'▼'}</span>}
               </div>
-              {g.devices.length>1&&(<span style={{fontSize:14,color:'var(--muted)'}}>{joinExp[min]?'▲':'▼'}</span>)}
+              {(single||joinExp[min])&&(
+                <div style={{marginTop:6,borderTop:'1px solid var(--border)',paddingTop:6}}>
+                  {g.devices.map((d,j)=>(
+                    <div key={j} style={{display:'flex',alignItems:'center',gap:8,
+                      padding:'3px 0',fontSize:12,color:'var(--textdim)'}}>
+                      <span style={{width:6,height:6,borderRadius:'50%',background:'var(--accent2)',
+                        display:'inline-block',flexShrink:0}}/>
+                      <span style={{fontWeight:600}}>{d.name}</span>
+                      <span style={{fontFamily:'monospace',color:'var(--muted)',fontSize:11}}>{d.ip}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            {(g.devices.length===1||joinExp[min])&&(
-              <div style={{marginTop:6,borderTop:'1px solid var(--border)',paddingTop:6}}>
-                {g.devices.map((d,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0',fontSize:12,color:'var(--textdim)'}}>
-                    <span style={{width:6,height:6,borderRadius:'50%',background:'var(--accent2)',display:'inline-block',flexShrink:0}}/>
-                    <span style={{fontWeight:600}}>{d.name}</span>
-                    <span style={{fontFamily:'monospace',color:'var(--muted)',fontSize:11}}>{d.ip}</span>
-                  </div>
-                ))}
+          );
+        }
+        if(item.type==='restore'){
+          const g=item.g;
+          const min=(g.time||'').slice(0,16);
+          const single=g.devices.length===1;
+          return(
+            <div key={'r'+i} className="alert-card" style={{borderLeft:'3px solid var(--accent2)',marginBottom:8}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+                cursor:single?'default':'pointer'}}
+                onClick={()=>!single&&setRestExp(p=>({...p,[min]:!p[min]}))}>
+                <div>
+                  <span style={{fontSize:12,fontWeight:700,color:'var(--accent2)'}}>
+                    ✅ {single?'DEVICE RESTORED':`${g.devices.length} DEVICES RESTORED`}
+                  </span>
+                  <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{g.time}</div>
+                </div>
+                {!single&&<span style={{fontSize:14,color:'var(--muted)'}}>{restExp[min]?'▲':'▼'}</span>}
               </div>
-            )}
+              {(single||restExp[min])&&(
+                <div style={{marginTop:6,borderTop:'1px solid rgba(0,255,136,0.1)',paddingTop:6}}>
+                  {g.devices.map((d,j)=>(
+                    <div key={j} style={{display:'flex',alignItems:'center',gap:8,
+                      padding:'3px 0',fontSize:12,color:'var(--textdim)'}}>
+                      <span style={{width:6,height:6,borderRadius:'50%',background:'var(--accent2)',
+                        display:'inline-block',flexShrink:0}}/>
+                      <span style={{fontWeight:600}}>{d.name}</span>
+                      <span style={{fontFamily:'monospace',color:'var(--muted)',fontSize:11}}>{d.ip}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        }
+        const type=parseAlertType(item.a.raw||'');
+        const msg=cleanMsg(item.a.raw||item.a.message||'');
+        return(
+          <div key={'a'+i} className={`alert-card alert-${type}`} style={{marginBottom:8}}>
+            <div className="alert-time">{item.a.timestamp}</div>
+            <div className="alert-msg">{msg}</div>
           </div>
         );
       })}
-      {(()=>{
-        const restoredAlerts=otherAlerts.filter(a=>(a.raw||a.message||'').includes('DEVICE RESTORED'));
-        const restGroups={};
-        restoredAlerts.forEach(a=>{
-          const min=(a.timestamp||'').slice(0,16);
-          if(!restGroups[min])restGroups[min]={time:a.timestamp,alerts:[],devices:[]};
-          restGroups[min].alerts.push(a);
-          const devM=(a.raw||'').match(/Device\s*:\s*(\S+)/i);
-          const ipM=(a.raw||'').match(/IP\s*:\s*([\d.]+)/i);
-          if(devM)restGroups[min].devices.push({name:devM[1],ip:ipM?ipM[1]:''});
-        });
-        const nonRestored=otherAlerts.filter(a=>!(a.raw||a.message||'').includes('DEVICE RESTORED'));
-        const [restExp,setRestExp]=React.useState({});
-        const allItems=[
-          ...Object.values(restGroups).map(g=>({type:'restore',g,ts:g.time})),
-          ...nonRestored.map(a=>({type:'alert',a,ts:a.timestamp})),
-        ].sort((x,y)=>(y.ts||'').localeCompare(x.ts||''));
-        return allItems.slice(0,80).map((item,i)=>{
-          if(item.type==='restore'){
-            const g=item.g;
-            const min=(g.time||'').slice(0,16);
-            const single=g.devices.length===1;
-            return(
-              <div key={'r'+i} className="alert-card" style={{borderLeft:'3px solid var(--accent2)',marginBottom:8}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:single?'default':'pointer'}} onClick={()=>!single&&setRestExp(p=>({...p,[min]:!p[min]}))}>
-                  <div>
-                    <span style={{fontSize:12,fontWeight:700,color:'var(--accent2)'}}>✅ {single?'DEVICE RESTORED':`${g.devices.length} DEVICES RESTORED`}</span>
-                    <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{g.time}</div>
-                  </div>
-                  {!single&&<span style={{fontSize:14,color:'var(--muted)'}}>{restExp[min]?'▲':'▼'}</span>}
-                </div>
-                {(single||restExp[min])&&(
-                  <div style={{marginTop:6,borderTop:'1px solid rgba(0,255,136,0.1)',paddingTop:6}}>
-                    {g.devices.map((d,j)=>(
-                      <div key={j} style={{display:'flex',alignItems:'center',gap:8,padding:'3px 0',fontSize:12,color:'var(--textdim)'}}>
-                        <span style={{width:6,height:6,borderRadius:'50%',background:'var(--accent2)',display:'inline-block',flexShrink:0}}/>
-                        <span style={{fontWeight:600}}>{d.name}</span>
-                        <span style={{fontFamily:'monospace',color:'var(--muted)',fontSize:11}}>{d.ip}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          }
-          const type=parseAlertType(item.a.raw||'');
-          const msg=cleanMsg(item.a.raw||item.a.message||'');
-          return(
-            <div key={'a'+i} className={`alert-card alert-${type}`} style={{marginBottom:8}}>
-              <div className="alert-time">{item.a.timestamp}</div>
-              <div className="alert-msg">{msg}</div>
-            </div>
-          );
-        });
-      })()}
     </div>
   );
 }
-
 function WhitelistPanel({devices,isAdmin}){
   const[rules,setRules]=React.useState([]);
   const[src,setSrc]=React.useState('');
@@ -907,6 +946,180 @@ function WhitelistPanel({devices,isAdmin}){
   );
 }
 
+function DeviceHistoryPanel({devices,onSelect}){
+  const[open,setOpen]=React.useState(false);
+  const[selected,setSelected]=React.useState(null);
+  const[filter,setFilter]=React.useState('all');
+
+  const filtered=filter==='all'?devices
+    :filter==='iot'?devices.filter(d=>d.lan==='iot-lan'&&!d.quarantined)
+    :filter==='quar'?devices.filter(d=>d.quarantined)
+    :devices.filter(d=>d.lan==='c-devices');
+
+  const sel=selected?devices.find(d=>d.name===selected):null;
+  const hist=sel?.score_history||[];
+  const score=sel?calcScore(sel):0;
+
+  // Parse connection info from device data
+  const connTypes=[
+    sel?.type&&{label:'Device Type',val:sel.type,icon:'📡'},
+    sel?.ports?.length&&{label:'Open Ports',val:sel.ports.join(', '),icon:'🔌'},
+    sel?.connections!=null&&{label:'Active Connections',val:sel.connections,icon:'🔗'},
+    sel?.scanning&&{label:'Port Scanning',val:'Detected',icon:'⚠️',danger:true},
+    sel?.east_west&&{label:'East-West Traffic',val:'Detected',icon:'🔀',danger:true},
+    sel?.under_attack&&{label:'Under Attack',val:'Yes',icon:'🚨',danger:true},
+    sel?.rl_penalty>0&&{label:'Rate Penalty',val:`-${sel.rl_penalty} pts`,icon:'📉',warn:true},
+    sel?.mac&&{label:'MAC Address',val:sel.mac,icon:'🖧'},
+    sel?.vendor&&sel.vendor!=='Unknown'&&{label:'Manufacturer',val:sel.vendor,icon:'🏭'},
+    sel?.violations>0&&{label:'Quarantine Count',val:sel.violations,icon:'🔒',warn:true},
+    sel?.last_seen&&{label:'Last Seen',val:sel.last_seen,icon:'🕐'},
+  ].filter(Boolean);
+
+  return(
+    <div className="zone-card" style={{marginBottom:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}
+           onClick={()=>setOpen(p=>!p)}>
+        <div>
+          <div style={{fontSize:15,fontWeight:700}}>📊 Device History & Connections</div>
+          <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>
+            Connection history, ports, traffic patterns per device
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontSize:11,background:'rgba(0,212,255,0.1)',color:'var(--accent)',
+            padding:'2px 8px',borderRadius:8}}>{devices.length} devices</span>
+          <span style={{fontSize:11,color:'var(--muted)'}}>{open?'▲':'▼'}</span>
+        </div>
+      </div>
+
+      {open&&(
+        <div style={{marginTop:12,borderTop:'1px solid var(--border)',paddingTop:12}}>
+          {/* Filter bar */}
+          <div style={{display:'flex',gap:6,marginBottom:12,flexWrap:'wrap'}}>
+            {[['all','All'],['iot','IoT'],['quar','Isolated'],['trusted','Trusted']].map(([k,l])=>(
+              <button key={k} onClick={()=>setFilter(k)} style={{
+                padding:'4px 12px',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer',
+                background:filter===k?'var(--accent)':'rgba(255,255,255,0.05)',
+                color:filter===k?'#000':'var(--muted)',border:'1px solid var(--border)'}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:sel?'1fr 1.4fr':'1fr',gap:12}}>
+            {/* Device list */}
+            <div style={{maxHeight:320,overflowY:'auto'}}>
+              {filtered.map(d=>{
+                const s=calcScore(d);
+                const isSel=selected===d.name;
+                return(
+                  <div key={d.name}
+                    onClick={()=>{setSelected(isSel?null:d.name);onSelect&&onSelect(d);}}
+                    style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',
+                      borderRadius:8,marginBottom:4,cursor:'pointer',
+                      background:isSel?'rgba(0,212,255,0.08)':'rgba(255,255,255,0.02)',
+                      border:`1px solid ${isSel?'var(--accent)':'var(--border)'}`,
+                      transition:'all 0.15s'}}>
+                    <span style={{fontSize:18,flexShrink:0}}>{d.icon||'📱'}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600,overflow:'hidden',
+                        textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                        {d.friendly_name||d.name}
+                      </div>
+                      <div style={{fontSize:10,color:'var(--muted)',fontFamily:'monospace'}}>{d.ip}</div>
+                    </div>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:3}}>
+                      <span style={{fontSize:12,fontWeight:700,color:scoreColor(s),
+                        background:`${scoreColor(s)}18`,padding:'1px 6px',borderRadius:4}}>{s}</span>
+                      {d.connections>0&&(
+                        <span style={{fontSize:10,color:'var(--muted)'}}>🔗 {d.connections}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Detail panel */}
+            {sel&&(
+              <div style={{background:'rgba(0,0,0,0.2)',borderRadius:10,padding:14,
+                border:'1px solid var(--border)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+                  <span style={{fontSize:28}}>{sel.icon||'📱'}</span>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:700}}>{sel.friendly_name||sel.name}</div>
+                    <div style={{fontSize:11,color:'var(--muted)',fontFamily:'monospace'}}>{sel.ip}</div>
+                  </div>
+                  <div style={{marginLeft:'auto',textAlign:'center',
+                    background:`${scoreColor(score)}18`,padding:'6px 12px',borderRadius:8}}>
+                    <div style={{fontSize:20,fontWeight:800,color:scoreColor(score)}}>{score}</div>
+                    <div style={{fontSize:9,color:'var(--muted)'}}>TRUST</div>
+                  </div>
+                </div>
+
+                {/* Score sparkline */}
+                {hist.length>=2&&(
+                  <div style={{marginBottom:12,padding:'8px 10px',background:'rgba(0,0,0,0.2)',
+                    borderRadius:8,border:'1px solid var(--border)'}}>
+                    <div style={{fontSize:10,color:'var(--muted)',marginBottom:4}}>SCORE TREND ({hist.length} readings)</div>
+                    <Sparkline data={hist} width={200} height={36} color={scoreColor(score)}/>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:9,
+                      color:'var(--muted)',marginTop:2}}>
+                      <span>min {Math.min(...hist.map(p=>p.score||p))}</span>
+                      <span>avg {sel.score_avg||score}</span>
+                      <span>now {score}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Info grid */}
+                <div style={{display:'flex',flexDirection:'column',gap:0}}>
+                  {connTypes.map((item,i)=>(
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:8,
+                      padding:'6px 0',
+                      borderBottom:i<connTypes.length-1?'1px solid rgba(255,255,255,0.04)':'none'}}>
+                      <span style={{fontSize:13,width:20,textAlign:'center',flexShrink:0}}>{item.icon}</span>
+                      <span style={{fontSize:11,color:'var(--muted)',flex:1}}>{item.label}</span>
+                      <span style={{fontSize:11,fontWeight:600,fontFamily:'monospace',
+                        color:item.danger?'var(--danger)':item.warn?'var(--warn)':'var(--text)',
+                        textAlign:'right',maxWidth:140,overflow:'hidden',
+                        textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                        {String(item.val)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Score deduction badges */}
+                {sel.score_reasons?.length>0&&(
+                  <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid var(--border)'}}>
+                    <div style={{fontSize:10,color:'var(--muted)',marginBottom:6}}>SCORE DEDUCTIONS</div>
+                    <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                      {sel.score_reasons.map((r,i)=>{
+                        const sev=r.includes('50')||r.includes('40')||r.includes('35');
+                        return(
+                          <span key={i} style={{padding:'2px 7px',borderRadius:5,fontSize:10,
+                            fontWeight:600,
+                            background:sev?'rgba(255,59,92,0.12)':'rgba(255,184,0,0.1)',
+                            color:sev?'var(--danger)':'var(--warn)',
+                            border:`1px solid ${sev?'rgba(255,59,92,0.3)':'rgba(255,184,0,0.3)'}`}}>
+                            {r}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function NetworkTab({devices,onSelect,isAdmin}){
   const[expanded,setExpanded]=useState(null);
   const subnet=ip=>ip?ip.split('.').slice(0,3).join('.')+'.0/24':null;
@@ -921,6 +1134,7 @@ function NetworkTab({devices,onSelect,isAdmin}){
         <div className="chart-title"><span>Network Topology</span></div>
         <NetworkMap devices={devices}/>
       </div>
+      <DeviceHistoryPanel devices={devices} onSelect={onSelect}/>
       <WhitelistPanel devices={devices} isAdmin={isAdmin}/>
       {Object.entries(lans).map(([name,{devices:devs,color,subnet:sn,icon}])=>{
         const scores=devs.map(d=>calcScore(d));
@@ -1060,7 +1274,6 @@ function App(){
   if(!authed)return<LoginScreen onLogin={()=>{setAuthed(true);fetchAll()}}/>;
 
   const quarCount=devices.filter(d=>d.quarantined).length;
-  const alertToday=alerts.filter(a=>(a.timestamp||'').slice(0,10)===new Date().toISOString().slice(0,10)).length;
   const atRisk=devices.filter(d=>!d.quarantined&&calcScore(d)<60).length;
   const trusted=devices.length-quarCount-atRisk;
 
@@ -1101,17 +1314,26 @@ function App(){
       </div>
 
       <nav className="bottom-nav">
-        {[{id:'devices',icon:'📱',label:'Devices'},
-          {id:'alerts',icon:'🔔',label:'Alerts',badge:alertToday>0},
-          {id:'charts',icon:'📊',label:'Charts'},
-          {id:'network',icon:'🌐',label:'Network'},
-        ].map(({id,icon,label,badge})=>(
-          <button key={id} className={`nav-item${tab===id?' active':''}`} onClick={()=>setTab(id)} style={{position:'relative'}}>
-            <span className="nav-icon">{icon}</span>
-            <span className="nav-label">{label}</span>
-            {badge&&tab!==id&&<span className="nav-dot"/>}
-          </button>
-        ))}
+        {(()=>{
+          const _ls=sessionStorage.getItem('zt_alerts_seen')||'';
+          const _ur=alerts.filter(a=>(a.timestamp||'')>_ls).length;
+          return[
+            {id:'devices',icon:'📱',label:'Devices'},
+            {id:'alerts',icon:'🔔',label:'Alerts'},
+            {id:'charts',icon:'📊',label:'Charts'},
+            {id:'network',icon:'🌐',label:'Network'},
+          ].map(({id,icon,label})=>(
+            <button key={id} className={`nav-item${tab===id?' active':''}`}
+              onClick={()=>{setTab(id);if(id==='alerts'){sessionStorage.setItem('zt_alerts_seen',alerts[0]?.timestamp||new Date().toISOString().slice(0,19).replace('T',' '));}}}
+              style={{position:'relative'}}>
+              <span className="nav-icon">{icon}</span>
+              <span className="nav-label">{label}</span>
+              {id==='alerts'&&_ur>0&&tab!=='alerts'&&(
+                <span style={{position:'absolute',top:2,right:14,minWidth:16,height:16,borderRadius:8,background:'var(--danger)',color:'#fff',fontSize:10,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 4px',border:'2px solid var(--bg)'}}>{_ur>99?'99+':_ur}</span>
+              )}
+            </button>
+          ));
+        })()}
       </nav>
 
       {selected&&<DeviceSheet device={selected} onClose={()=>setSelected(null)} onAction={handleAction} loading={loading}/>}
