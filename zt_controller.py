@@ -241,33 +241,76 @@ def main():
                 if dst_ip.startswith(IOT_NET):
                     attacked_devices.add(dst_ip)
 
+        # Load whitelist for east-west check
+        _wl = []
+        try:
+            with open(env("WHITELIST_FILE", "/home/sk/iot_whitelist.json")) as _wf:
+                _wl = json.load(_wf)
+        except Exception:
+            pass
+
         ew_containers = set()
+
+        # Load whitelist once per cycle for east-west filtering
+        _wl_rules = []
+        try:
+            import json as _jwl
+            with open(os.path.join(os.environ.get("SK_HOME", "/home/sk"), "iot_whitelist.json")) as _wf:
+                _wl_rules = _jwl.load(_wf)
+        except Exception as _wl_err:
+            log(f"Whitelist load error: {_wl_err}", "WARN")
+
         for ew_src, ew_dsts in east_west_map.items():
             ew_dsts = {d for d in ew_dsts if not d.endswith('.1')}
             if not ew_dsts:
                 continue
             ew_container = get_container_name(ew_src)
             if not ew_container or ew_container == ew_src:
+                log(f"EW: cannot resolve container for {ew_src}, skipping", "WARN")
                 continue
-            log(f"EAST-WEST DETECTED: {ew_container} ({ew_src}) → {len(ew_dsts)} IoT devices", "ALERT")
+
+            # Check each destination against whitelist
+            blocked_dsts = set()
+            allowed_dsts = set()
+            for dst_ip in ew_dsts:
+                dst_name = get_container_name(dst_ip)
+                if dst_name and dst_name != dst_ip:
+                    is_wl = any(
+                        r.get("src") == ew_container and r.get("dst") == dst_name
+                        for r in _wl_rules
+                    )
+                    if is_wl:
+                        allowed_dsts.add(dst_ip)
+                        log(f"WHITELIST ALLOW: {ew_container} ({ew_src}) → {dst_name} ({dst_ip})")
+                    else:
+                        blocked_dsts.add(dst_ip)
+                else:
+                    # Cannot resolve dst — treat as blocked
+                    blocked_dsts.add(dst_ip)
+                    log(f"EW: cannot resolve {dst_ip}, treating as blocked", "WARN")
+
+            if not blocked_dsts:
+                log(f"EW: {ew_container} all {len(allowed_dsts)} destination(s) whitelisted — no action")
+                continue
+
+            # Only act on non-whitelisted destinations
+            log(f"EAST-WEST DETECTED: {ew_container} ({ew_src}) → {len(blocked_dsts)} blocked IoT device(s)", "ALERT")
             am.send_alert(am.ALERT_EAST_WEST, {
                 "src_device": ew_container, "src_ip": ew_src,
-                "dst_ip":     ", ".join(ew_dsts), "attempts": len(ew_dsts),
+                "dst_ip":     ", ".join(blocked_dsts), "attempts": len(blocked_dsts),
             })
             if ew_container in dh:
                 dh[ew_container]["east_west"] = True
                 ew_containers.add(ew_container)
                 if not dh[ew_container].get("quarantined", False):
-                    _ew_reason = f"East-west lateral movement to {', '.join(ew_dsts)}"
+                    _ew_reason = f"East-west lateral movement to {', '.join(blocked_dsts)}"
                     dh[ew_container]["quarantine_reason"] = _ew_reason
                     quarantine_device(
-                        ew_container, ew_src,
-                        _ew_reason,
+                        ew_container, ew_src, _ew_reason,
                         dh[ew_container].get("device_type", "Unknown IoT Device"),
                         dh, ew_container
                     )
                     force_rediscovery = True
-
         drop_counts = rl.read_drop_counts()
         log(f"Rate drop counts this cycle: {drop_counts}")
 
